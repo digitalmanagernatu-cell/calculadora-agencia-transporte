@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import PasswordModal from '../components/PasswordModal';
 
 const SCOPE_OPTIONS = [
-  { value: 'nacional', label: 'Nacional' },
-  { value: 'internacional', label: 'Internacional' },
-  { value: 'ambas', label: 'Ambas (nacional + internacional en el mismo archivo)' },
+  { value: 'nacional', label: 'Peninsular (España + Portugal)' },
+  { value: 'internacional', label: 'Internacional (resto del mundo)' },
+  { value: 'ambas', label: 'Ambas (peninsular + internacional en el mismo archivo)' },
 ];
 
 export default function Upload() {

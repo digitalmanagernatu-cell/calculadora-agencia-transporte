@@ -69,7 +69,9 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
   if (scope === 'nacional') {
     if (!postalCode) return null;
 
-    const prefix = String(postalCode).padStart(5, '0').substring(0, 2);
+    // Spanish CPs: 5 digits. Portuguese CPs: 4 digits. Extract first 2 digits directly.
+    const cpStr = String(postalCode).replace(/\D/g, '');
+    const prefix = cpStr.substring(0, 2);
 
     // For NACEX: no zone_mappings, always use 'Nacional Peninsular+Andorra'
     // (unless it's a Canarias or special CP that Nacex doesn't cover via this route)
@@ -167,7 +169,7 @@ router.post('/quote', (req, res) => {
     return res.status(400).json({ error: 'Tipo de destino inválido' });
   }
   if (destination_type === 'nacional' && !postal_code) {
-    return res.status(400).json({ error: 'Se requiere código postal para envíos nacionales' });
+    return res.status(400).json({ error: 'Se requiere código postal para envíos peninsulares' });
   }
   if (destination_type === 'internacional' && !country) {
     return res.status(400).json({ error: 'Se requiere país para envíos internacionales' });

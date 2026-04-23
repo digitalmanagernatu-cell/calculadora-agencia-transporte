@@ -68,7 +68,7 @@ export default function Tariffs() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de tarifa</label>
             <div className="flex gap-3">
               {[
-                { value: 'nacional', label: 'Nacional' },
+                { value: 'nacional', label: 'Peninsular' },
                 { value: 'internacional', label: 'Internacional' },
               ].map(opt => (
                 <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer">
