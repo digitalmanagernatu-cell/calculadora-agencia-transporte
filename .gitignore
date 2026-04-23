@@ -1,0 +1,10 @@
+node_modules/
+server/node_modules/
+client/node_modules/
+server/database.sqlite
+server/uploads/
+.env
+server/.env
+dist/
+client/dist/
+*.sqlite
