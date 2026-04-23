@@ -1,38 +1,6 @@
 import { useState, useEffect } from 'react';
 import AgencyResult from '../components/AgencyResult';
 
-// Countries covered by international tariffs
-const COUNTRIES_LIST = [
-  'Alemania',
-  'Andorra',
-  'Austria',
-  'Bélgica',
-  'Bosnia',
-  'Croacia',
-  'Dinamarca',
-  'Estonia',
-  'Finlandia',
-  'Francia',
-  'Gran Bretaña',
-  'Holanda',
-  'Hungría',
-  'Irlanda',
-  'Italia Zona 1',
-  'Italia Zona 2',
-  'Latvia',
-  'Liechtenstein',
-  'Lituania',
-  'Luxemburgo',
-  'Mónaco',
-  'Montenegro',
-  'Polonia',
-  'Portugal Peninsular',
-  'República Checa',
-  'Serbia',
-  'Suecia',
-  'Suiza',
-];
-
 const INITIAL_FORM = {
   weight_kg: '',
   destination_type: 'nacional',
@@ -40,12 +8,36 @@ const INITIAL_FORM = {
   country: '',
 };
 
+// Normalize accents for deduplication comparison
+function normalizeAccents(s) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
 export default function Calculator() {
   const [form, setForm] = useState(INITIAL_FORM);
   const [results, setResults] = useState(null);
+  const [countriesList, setCountriesList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
+
+  useEffect(() => {
+    fetch('/api/calculator/countries')
+      .then(r => r.json())
+      .then(data => {
+        // Deduplicate by normalized key (no accents), keeping the accented version when possible
+        const seen = new Map();
+        for (const name of data) {
+          const key = normalizeAccents(name);
+          const existing = seen.get(key);
+          if (!existing || (name !== normalizeAccents(name) && existing === normalizeAccents(existing))) {
+            seen.set(key, name);
+          }
+        }
+        setCountriesList([...seen.values()].sort((a, b) => a.localeCompare(b, 'es')));
+      })
+      .catch(() => {});
+  }, []);
 
   function validate() {
     const errors = {};
@@ -202,8 +194,8 @@ export default function Calculator() {
                   validationErrors.country ? 'border-red-400' : 'border-gray-300'
                 }`}
               >
-                <option value="">— Selecciona un país —</option>
-                {COUNTRIES_LIST.map(c => (
+                <option value="">— Selecciona un destino —</option>
+                {countriesList.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
