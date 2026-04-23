@@ -10,8 +10,8 @@ const tariffsRouter = require('./routes/tariffs');
 const calculatorRouter = require('./routes/calculator');
 
 const PORT = process.env.PORT || 3001;
-const UPLOADS_PATH = path.resolve(process.env.UPLOADS_PATH || './uploads');
-const INITIAL_DATA_PATH = path.resolve(process.env.INITIAL_DATA_PATH || '../data/initial');
+const UPLOADS_PATH = path.resolve(__dirname, process.env.UPLOADS_PATH || './uploads');
+const INITIAL_DATA_PATH = path.resolve(__dirname, process.env.INITIAL_DATA_PATH || '../data/initial');
 
 // Ensure uploads directory exists
 if (!fs.existsSync(UPLOADS_PATH)) {
