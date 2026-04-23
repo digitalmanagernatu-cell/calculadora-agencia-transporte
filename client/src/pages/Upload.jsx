@@ -22,6 +22,10 @@ export default function Upload() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // agency object pending delete
+  const [deleting, setDeleting] = useState(false);
+  const [deleteResult, setDeleteResult] = useState(null);
+
   useEffect(() => {
     if (!authenticated) return;
     fetch('/api/agencies')
@@ -36,6 +40,12 @@ export default function Upload() {
   function handleAuth(password) {
     setAdminPassword(password);
     setAuthenticated(true);
+  }
+
+  async function reloadAgencies() {
+    const data = await fetch('/api/agencies').then(r => r.json());
+    setAgencies(data);
+    return data;
   }
 
   async function handleSubmit(e) {
@@ -82,13 +92,50 @@ export default function Upload() {
 
       setResult(json);
       setForm(prev => ({ ...prev, file: null }));
-      // Reload agencies in case new one was created
-      const updatedAgencies = await fetch('/api/agencies').then(r => r.json());
-      setAgencies(updatedAgencies);
+      const updated = await reloadAgencies();
+      if (updated.length > 0 && !updated.find(a => String(a.id) === form.agency_id)) {
+        setForm(prev => ({ ...prev, agency_id: String(updated[0].id) }));
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    setDeleteResult(null);
+    try {
+      const res = await fetch(`/api/agencies/${deleteConfirm.id}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-password': adminPassword },
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) {
+          setAuthenticated(false);
+          setDeleteConfirm(null);
+          setError('Contraseña incorrecta. Vuelve a introducirla.');
+        } else {
+          throw new Error(json.error || 'Error al eliminar la agencia');
+        }
+        return;
+      }
+      setDeleteResult(`Agencia "${json.deleted}" eliminada correctamente.`);
+      setDeleteConfirm(null);
+      const updated = await reloadAgencies();
+      setForm(prev => ({
+        ...prev,
+        agency_id: updated.length > 0 ? String(updated[0].id) : '__new__',
+        new_agency_name: '',
+      }));
+    } catch (err) {
+      setError(err.message);
+      setDeleteConfirm(null);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -103,6 +150,7 @@ export default function Upload() {
         <p className="text-gray-500 mt-1">Sube o actualiza las tarifas de las agencias de transporte</p>
       </div>
 
+      {/* Upload form */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 max-w-2xl">
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Agency selector */}
@@ -211,6 +259,72 @@ export default function Upload() {
           </p>
         </div>
       </div>
+
+      {/* Agency management */}
+      {agencies.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 max-w-2xl mt-6">
+          <h2 className="text-base font-semibold text-gray-800 mb-4">Agencias registradas</h2>
+
+          {deleteResult && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-green-800 text-sm mb-4">
+              {deleteResult}
+            </div>
+          )}
+
+          <ul className="divide-y divide-gray-100">
+            {agencies.map(a => (
+              <li key={a.id} className="flex items-center justify-between py-3">
+                <span className="text-sm font-medium text-gray-800">{a.display_name}</span>
+                <button
+                  onClick={() => { setDeleteConfirm(a); setDeleteResult(null); setError(null); }}
+                  className="text-xs text-red-600 hover:text-red-800 font-medium px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
+                >
+                  Eliminar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Eliminar agencia</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              ¿Seguro que quieres eliminar <strong>{deleteConfirm.display_name}</strong>?
+            </p>
+            <p className="text-xs text-red-600 mb-5">
+              Se borrarán todas sus tarifas y no aparecerá en la calculadora.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    Eliminando...
+                  </>
+                ) : 'Sí, eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
