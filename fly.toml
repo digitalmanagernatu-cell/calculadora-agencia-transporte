@@ -1,0 +1,25 @@
+app = "calculadora-natu"
+primary_region = "mad"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  DB_PATH = "/data/database.sqlite"
+  UPLOADS_PATH = "/data/uploads"
+  INITIAL_DATA_PATH = "/app/data/initial"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "natu_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
