@@ -45,6 +45,11 @@ function initSchema() {
       destination TEXT NOT NULL,
       FOREIGN KEY(agency_id) REFERENCES agencies(id)
     );
+
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 }
 

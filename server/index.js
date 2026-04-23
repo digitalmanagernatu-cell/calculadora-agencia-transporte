@@ -18,15 +18,25 @@ if (!fs.existsSync(UPLOADS_PATH)) {
   fs.mkdirSync(UPLOADS_PATH, { recursive: true });
 }
 
+// Increment this when parsers or zone mappings change — forces a full reseed
+const SEED_VERSION = 3;
+
 // Initialize DB schema
 initSchema();
 
-// Seed initial data if agencies table is empty
+// Seed initial data when DB is empty OR seed version has changed
 async function seedInitialData() {
-  const { c } = db.prepare('SELECT COUNT(*) as c FROM agencies').get();
-  if (c > 0) return;
+  const stored = db.prepare("SELECT value FROM meta WHERE key = 'seed_version'").get();
+  const storedVersion = stored ? parseInt(stored.value, 10) : 0;
+  const agencyCount = db.prepare('SELECT COUNT(*) as c FROM agencies').get().c;
 
-  console.log('[seed] Base de datos vacía, importando tarifas iniciales...');
+  if (agencyCount > 0 && storedVersion >= SEED_VERSION) return;
+
+  if (agencyCount === 0) {
+    console.log('[seed] Base de datos vacía, importando tarifas iniciales...');
+  } else {
+    console.log(`[seed] Versión de datos desactualizada (${storedVersion} → ${SEED_VERSION}), re-importando...`);
+  }
 
   const seedList = [
     { file: 'redur 2026.xlsx',               agencyName: 'REDUR',     displayName: 'Redur',    scope: 'nacional' },
@@ -101,6 +111,9 @@ async function seedInitialData() {
       console.error(`[seed] Error procesando ${seed.file}:`, err.message);
     }
   }
+
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('seed_version', ?)").run(String(SEED_VERSION));
+  console.log(`[seed] Versión de datos actualizada a ${SEED_VERSION}`);
 }
 
 seedInitialData().then(() => {
