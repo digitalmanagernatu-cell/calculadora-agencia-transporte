@@ -1,5 +1,5 @@
 app = "calculadora-natu"
-primary_region = "mad"
+primary_region = "ams"
 
 [build]
 
