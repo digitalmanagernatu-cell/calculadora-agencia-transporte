@@ -8,3 +8,5 @@ server/.env
 dist/
 client/dist/
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
