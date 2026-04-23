@@ -29,10 +29,10 @@ async function seedInitialData() {
   console.log('[seed] Base de datos vacía, importando tarifas iniciales...');
 
   const seedList = [
-    { file: 'redur_2026.xlsx',               agencyName: 'REDUR',     displayName: 'Redur',    scope: 'nacional' },
-    { file: 'redur_internacional_2026.xlsx', agencyName: 'REDUR',     displayName: 'Redur',    scope: 'internacional' },
-    { file: 'transaher_2026.xlsx',           agencyName: 'TRANSAHER', displayName: 'Transaher', scope: 'ambas' },
-    { file: 'nacex_2026.xlsx',              agencyName: 'NACEX',     displayName: 'Nacex',    scope: 'nacional' },
+    { file: 'redur 2026.xlsx',               agencyName: 'REDUR',     displayName: 'Redur',    scope: 'nacional' },
+    { file: 'redur internacional 2026.xlsx', agencyName: 'REDUR',     displayName: 'Redur',    scope: 'internacional' },
+    { file: 'transaher 2026.xlsx',           agencyName: 'TRANSAHER', displayName: 'Transaher', scope: 'ambas' },
+    { file: 'nacex 2026.xlsx',              agencyName: 'NACEX',     displayName: 'Nacex',    scope: 'nacional' },
   ];
 
   for (const seed of seedList) {

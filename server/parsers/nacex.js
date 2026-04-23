@@ -10,7 +10,8 @@ const SERVICES = [
 
 // extra_per_kg for weights > 40 kg: fraction of 5-kg block = 3.68 / 5
 const EXTRA_PER_KG = parseFloat((3.68 / 5).toFixed(6));
-const PRICE_COL = 1; // column B (idx 1)
+const LABEL_COL = 1; // column B (idx 1)
+const PRICE_COL = 2; // column C (idx 2)
 
 function parse(filePath) {
   const wb = XLSX.readFile(filePath);
@@ -27,7 +28,7 @@ function parse(filePath) {
       const row = rows[i];
       if (!row) continue;
 
-      const rawLabel = row[0]; // e.g. "BAG 2 kg", "PACK 0 a 2 kg", "PACK 2 a 5 kg"
+      const rawLabel = row[LABEL_COL]; // e.g. "BAG 2 kg", "PACK 0 a 2 kg", "PACK 2 a 5 kg"
       const rawPrice = row[PRICE_COL];
 
       if (rawLabel === null && rawPrice === null) continue;

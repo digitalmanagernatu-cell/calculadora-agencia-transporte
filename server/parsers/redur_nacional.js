@@ -40,18 +40,19 @@ function buildZoneMappings() {
   };
 
   // PT3: Lisboa 10-21, 25-29; Porto 40-49
+  // Prefix stored as "PT" + 2-digit to avoid collision with Spanish CPs (e.g. PT10 ≠ 10)
   const pt3Prefixes = [];
-  for (let i = 10; i <= 21; i++) pt3Prefixes.push(String(i).padStart(2, '0'));
-  for (let i = 25; i <= 29; i++) pt3Prefixes.push(String(i).padStart(2, '0'));
-  for (let i = 40; i <= 49; i++) pt3Prefixes.push(String(i).padStart(2, '0'));
+  for (let i = 10; i <= 21; i++) pt3Prefixes.push('PT' + String(i).padStart(2, '0'));
+  for (let i = 25; i <= 29; i++) pt3Prefixes.push('PT' + String(i).padStart(2, '0'));
+  for (let i = 40; i <= 49; i++) pt3Prefixes.push('PT' + String(i).padStart(2, '0'));
   mappings['PT3'] = pt3Prefixes;
 
   // PT4: 22-24, 30-38, 50-64, 70-89
   const pt4Prefixes = [];
-  for (let i = 22; i <= 24; i++) pt4Prefixes.push(String(i).padStart(2, '0'));
-  for (let i = 30; i <= 38; i++) pt4Prefixes.push(String(i).padStart(2, '0'));
-  for (let i = 50; i <= 64; i++) pt4Prefixes.push(String(i).padStart(2, '0'));
-  for (let i = 70; i <= 89; i++) pt4Prefixes.push(String(i).padStart(2, '0'));
+  for (let i = 22; i <= 24; i++) pt4Prefixes.push('PT' + String(i).padStart(2, '0'));
+  for (let i = 30; i <= 38; i++) pt4Prefixes.push('PT' + String(i).padStart(2, '0'));
+  for (let i = 50; i <= 64; i++) pt4Prefixes.push('PT' + String(i).padStart(2, '0'));
+  for (let i = 70; i <= 89; i++) pt4Prefixes.push('PT' + String(i).padStart(2, '0'));
   mappings['PT4'] = pt4Prefixes;
 
   const zoneMappings = [];

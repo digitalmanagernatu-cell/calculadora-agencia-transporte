@@ -69,19 +69,28 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
   if (scope === 'nacional') {
     if (!postalCode) return null;
 
-    // Spanish CPs: 5 digits. Portuguese CPs: 4 digits. Extract first 2 digits directly.
+    // Spanish CPs: 5 digits. Portuguese CPs: 4 digits.
     const cpStr = String(postalCode).replace(/\D/g, '');
+    const isPortuguese = cpStr.length === 4;
     const prefix = cpStr.substring(0, 2);
 
     // For NACEX: no zone_mappings, always use 'Nacional Peninsular+Andorra'
-    // (unless it's a Canarias or special CP that Nacex doesn't cover via this route)
+    // Canarias (35, 38) not covered. For Portuguese CPs, Nacex covers peninsular Portugal.
     if (normalize(agencyName) === 'NACEX') {
-      // Canarias CPs (35, 38) → Nacex doesn't cover them in this dataset
-      if (['35', '38'].includes(prefix)) return null;
+      if (!isPortuguese && ['35', '38'].includes(prefix)) return null;
       return 'Nacional Peninsular+Andorra';
     }
 
-    // Lookup by CP prefix in zone_mappings
+    // Portuguese CPs: look up with "PT" prefix to avoid collision with Spanish CP prefixes
+    if (isPortuguese) {
+      const ptDest = 'PT' + prefix;
+      const ptMapping = db.prepare(
+        'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination = ?'
+      ).get(agencyId, 'nacional', ptDest);
+      return ptMapping?.zone || null;
+    }
+
+    // Spanish CP: lookup by 2-digit prefix in zone_mappings
     const mapping = db.prepare(
       'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination = ?'
     ).get(agencyId, 'nacional', prefix);
@@ -234,9 +243,14 @@ router.post('/quote', (req, res) => {
   // Build destination_resolved string
   let destinationResolved = '';
   if (destination_type === 'nacional' && postal_code) {
-    const prefix = String(postal_code).padStart(5, '0').substring(0, 2);
-    const province = CP_PREFIX_TO_PROVINCE[prefix] || prefix;
-    destinationResolved = `${province} (${prefix}xxx)`;
+    const cpStr = String(postal_code).replace(/\D/g, '');
+    if (cpStr.length === 4) {
+      destinationResolved = `Portugal (${cpStr})`;
+    } else {
+      const prefix = cpStr.padStart(5, '0').substring(0, 2);
+      const province = CP_PREFIX_TO_PROVINCE[prefix] || prefix;
+      destinationResolved = `${province} (${prefix}xxx)`;
+    }
   } else if (destination_type === 'internacional' && country) {
     destinationResolved = country;
   }
