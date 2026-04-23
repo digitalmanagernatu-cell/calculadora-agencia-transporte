@@ -106,7 +106,11 @@ async function seedInitialData() {
 seedInitialData().then(() => {
   const app = express();
 
-  app.use(cors({ origin: 'http://localhost:5173' }));
+  // En desarrollo: CORS para Vite dev server. En producción Express sirve el frontend directamente.
+  if (process.env.NODE_ENV !== 'production') {
+    app.use(cors({ origin: 'http://localhost:5173' }));
+  }
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -115,6 +119,15 @@ seedInitialData().then(() => {
   app.use('/api/calculator', calculatorRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+  // En producción, servir el frontend compilado de React
+  if (process.env.NODE_ENV === 'production') {
+    const clientDist = path.join(__dirname, '../client/dist');
+    app.use(express.static(clientDist));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    });
+  }
 
   app.listen(PORT, () => {
     console.log(`[server] Servidor escuchando en http://localhost:${PORT}`);
