@@ -29,6 +29,7 @@ export default function Upload() {
       .then(data => {
         setAgencies(data);
         if (data.length > 0) setForm(prev => ({ ...prev, agency_id: String(data[0].id) }));
+        else setForm(prev => ({ ...prev, agency_id: '__new__' }));
       });
   }, [authenticated]);
 
