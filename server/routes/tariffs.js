@@ -34,6 +34,7 @@ function getParser(agencyName, scope) {
   if (name === 'REDUR' && scope === 'ambas') return null; // handled specially
   if (name === 'TRANSAHER') return require('../parsers/transaher');
   if (name === 'NACEX') return require('../parsers/nacex');
+  if (name.includes('PALEMA')) return require('../parsers/palemani');
   return require('../parsers/generic');
 }
 
