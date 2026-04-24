@@ -260,19 +260,44 @@ router.post('/quote', (req, res) => {
       continue;
     }
 
-    const price = calculatePrice(weightKg, tiers);
+    let price = calculatePrice(weightKg, tiers);
     if (price === null) {
       notCovered.push({ agency: agency.display_name, reason: 'Peso supera el máximo disponible sin tarifa por kg adicional' });
       continue;
+    }
+
+    // Palemanía-specific business rules
+    const notesList = [];
+    const surcharges = [];
+    if (normalize(agency.name).includes('PALEMA')) {
+      const zoneInt = Math.floor(parseFloat(zone.replace('ZONA ', '')));
+
+      // Zona 7.1 not yet active
+      if (zone === 'ZONA 7.1' && new Date() < new Date('2026-05-01')) {
+        notesList.push('Disponible desde el 01/05/2026');
+      }
+
+      // Premium-only zones
+      if ([10, 11, 12, 13].includes(zoneInt)) {
+        notesList.push('Solo disponible en servicio premium');
+      }
+
+      // DUA surcharge on zones 10 and 11
+      if ([10, 11].includes(zoneInt)) {
+        surcharges.push({ concept: 'Suplemento DUA', amount: 30 });
+        price = Math.round((price + 30) * 100) / 100;
+      }
     }
 
     results.push({
       agency_name: agency.display_name,
       zone,
       weight_billed_kg: weightKg,
+      base_price: price - surcharges.reduce((s, c) => s + c.amount, 0),
+      surcharges,
       price,
       scope: destination_type,
-      notes: '',
+      notes: notesList.join(' · '),
     });
   }
 

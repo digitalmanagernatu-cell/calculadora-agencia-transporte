@@ -1,4 +1,6 @@
-export default function AgencyResult({ agency_name, zone, price, scope, notes, isBest }) {
+export default function AgencyResult({ agency_name, zone, price, base_price, surcharges, scope, notes, isBest }) {
+  const hasSurcharges = surcharges && surcharges.length > 0;
+
   return (
     <div className={`p-4 rounded-lg border-2 transition-all ${
       isBest
@@ -19,9 +21,12 @@ export default function AgencyResult({ agency_name, zone, price, scope, notes, i
             <span className="font-medium text-gray-600">Zona:</span> {zone}
           </div>
           {notes && (
-            <div className="mt-1 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">{notes}</div>
+            <div className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
+              {notes}
+            </div>
           )}
         </div>
+
         <div className="text-right flex-shrink-0">
           <div className="text-2xl font-bold text-navy">
             {price !== null && price !== undefined ? price.toFixed(2) : '—'} €
@@ -29,6 +34,21 @@ export default function AgencyResult({ agency_name, zone, price, scope, notes, i
           <div className="text-xs text-gray-400 mt-0.5">sin IVA</div>
         </div>
       </div>
+
+      {hasSurcharges && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>Tarifa base</span>
+            <span>{base_price?.toFixed(2)} €</span>
+          </div>
+          {surcharges.map(s => (
+            <div key={s.concept} className="flex justify-between text-xs text-amber-700 font-medium mt-0.5">
+              <span>+ {s.concept}</span>
+              <span>+{s.amount.toFixed(2)} €</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

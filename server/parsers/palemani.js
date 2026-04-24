@@ -17,9 +17,11 @@ const CP_ZONE_MAPPINGS = {
   'ZONA 10': ['35', '38'],
 };
 
-const PT_RANGES = [
-  [10, 21], [22, 24], [25, 29], [30, 38], [40, 49], [50, 64], [70, 89],
-];
+// Portugal Zona 7.1 (activa desde 01/05/2026): prefijos CAP 10-19, 26-29, 37-38, 40-45
+const PT_ZONA_71 = [[10, 19], [26, 29], [37, 38], [40, 45]];
+
+// Portugal Zona 8: resto de peninsulares (excluidos los de Zona 7.1)
+const PT_ZONA_8 = [[20, 25], [30, 36], [46, 64], [70, 89]];
 
 const INTL_ZONE_DESTINATIONS = {
   'ZONA 11': ['Canarias Islas Menores'],
@@ -36,7 +38,13 @@ function buildZoneMappings() {
     }
   }
 
-  for (const [from, to] of PT_RANGES) {
+  for (const [from, to] of PT_ZONA_71) {
+    for (let i = from; i <= to; i++) {
+      mappings.push({ scope: 'nacional', zone: 'ZONA 7.1', destination: 'PT' + String(i).padStart(2, '0') });
+    }
+  }
+
+  for (const [from, to] of PT_ZONA_8) {
     for (let i = from; i <= to; i++) {
       mappings.push({ scope: 'nacional', zone: 'ZONA 8', destination: 'PT' + String(i).padStart(2, '0') });
     }
