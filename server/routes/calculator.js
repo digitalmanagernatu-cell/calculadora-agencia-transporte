@@ -137,7 +137,18 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
       const itMapping = db.prepare(
         'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination = ?'
       ).get(agencyId, 'internacional', capPrefix);
-      return itMapping?.zone || null;
+      if (itMapping) return itMapping.zone;
+      // Fallback for old DB data before re-upload: determine zone from CAP prefix numerically
+      const capNum = parseInt(capStr.substring(0, 2), 10);
+      if (!isNaN(capNum)) {
+        const isZona1 = capNum >= 10 && capNum <= 59;
+        const targetZone = isZona1 ? 'Italia Zona 1' : 'Italia Zona 2';
+        const oldMapping = db.prepare(
+          'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND zone = ? LIMIT 1'
+        ).get(agencyId, 'internacional', targetZone);
+        return oldMapping?.zone || null;
+      }
+      return null;
     }
 
     // Match country against zone_mappings destinations (skip IT## entries)
@@ -303,7 +314,7 @@ router.get('/countries', (req, res) => {
   const countries = [];
   let italiaAdded = false;
   for (const { destination } of rows) {
-    if (/^IT\d{2}$/.test(destination)) {
+    if (/^IT\d{2}$/.test(destination) || /^Italia(\s|$)/i.test(destination)) {
       if (!italiaAdded) { countries.push('Italia'); italiaAdded = true; }
     } else {
       countries.push(destination);
