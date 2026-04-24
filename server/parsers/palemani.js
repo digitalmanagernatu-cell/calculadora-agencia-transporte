@@ -52,13 +52,23 @@ function buildZoneMappings() {
 }
 
 
-// Find the header row: first row where column A is "Zona" or similar label
+// Find the header row: first row where column A is "Zona" or similar label.
+// Fallback: first row where col A is NOT a zone number but the NEXT row IS.
 function findHeaderRow(rows) {
   for (let i = 0; i < Math.min(rows.length, 20); i++) {
     const row = rows[i];
     if (!row) continue;
     const first = String(row[0] ?? '').trim().toLowerCase();
     if (first.startsWith('zon')) return i;
+  }
+  // Fallback: look for first row where col A is a zone number (0-13)
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const val = parseFloat(String(row[0] ?? '').replace(',', '.'));
+    if (!isNaN(val) && val >= 0 && val <= 13) {
+      return i - 1; // header is the row before first data row (may be -1 = no header)
+    }
   }
   return -1;
 }
@@ -88,6 +98,16 @@ function parse(filePath) {
     }
   }
 
+  // Fallback: no header found — infer price columns from first data row
+  if (priceCols.length === 0 && rows[dataStart]) {
+    const firstRow = rows[dataStart];
+    for (let c = 1; c < firstRow.length; c++) {
+      if (firstRow[c] !== null && firstRow[c] !== undefined) {
+        priceCols.push({ col: c, name: `Columna ${c}` });
+      }
+    }
+  }
+
   // Assign weight_max_kg as sequential integers (1, 2, 3...) by column order.
   // Palemanía prices by service type, not weight; we use ordinal position so
   // the calculator can sort tiers and select the appropriate one.
@@ -102,7 +122,7 @@ function parse(filePath) {
     const rawZone = row[0];
     if (rawZone === null || rawZone === undefined || String(rawZone).trim() === '') continue;
 
-    const zoneStr = String(rawZone).trim();
+    const zoneStr = String(rawZone).trim().replace(',', '.');
     const zoneNum = parseFloat(zoneStr);
     if (isNaN(zoneNum) || zoneNum < 0 || zoneNum > 13) continue;
 
