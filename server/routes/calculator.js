@@ -129,10 +129,21 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
     // Nacex has no international tariff
     if (normalize(agencyName) === 'NACEX') return null;
 
-    // Match country against zone_mappings destinations
+    // Italy: resolve zone by CAP prefix (stored as IT##)
+    if (normalize(country) === 'ITALIA') {
+      if (!postalCode) return null;
+      const capStr = String(postalCode).replace(/\D/g, '');
+      const capPrefix = 'IT' + capStr.substring(0, 2).padStart(2, '0');
+      const itMapping = db.prepare(
+        'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination = ?'
+      ).get(agencyId, 'internacional', capPrefix);
+      return itMapping?.zone || null;
+    }
+
+    // Match country against zone_mappings destinations (skip IT## entries)
     const normalizedCountry = normalize(country);
     const mappings = db.prepare(
-      'SELECT zone, destination FROM zone_mappings WHERE agency_id = ? AND scope = ?'
+      "SELECT zone, destination FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination NOT LIKE 'IT%'"
     ).all(agencyId, 'internacional');
 
     for (const m of mappings) {
@@ -195,6 +206,9 @@ router.post('/quote', (req, res) => {
   }
   if (destination_type === 'internacional' && !country) {
     return res.status(400).json({ error: 'Se requiere país para envíos internacionales' });
+  }
+  if (destination_type === 'internacional' && country && normalize(country) === 'ITALIA' && !postal_code) {
+    return res.status(400).json({ error: 'Se requiere código postal (CAP) para envíos a Italia' });
   }
 
   const weightKg = parseFloat(weight_kg);
@@ -265,7 +279,11 @@ router.post('/quote', (req, res) => {
       destinationResolved = `${province} (${prefix}xxx)`;
     }
   } else if (destination_type === 'internacional' && country) {
-    destinationResolved = country;
+    if (normalize(country) === 'ITALIA' && postal_code) {
+      destinationResolved = `Italia (CAP ${String(postal_code).replace(/\D/g, '')})`;
+    } else {
+      destinationResolved = country;
+    }
   }
 
   res.json({
@@ -281,7 +299,17 @@ router.get('/countries', (req, res) => {
   const rows = db.prepare(
     "SELECT DISTINCT destination FROM zone_mappings WHERE scope = 'internacional' ORDER BY destination ASC"
   ).all();
-  res.json(rows.map(r => r.destination));
+
+  const countries = [];
+  let italiaAdded = false;
+  for (const { destination } of rows) {
+    if (/^IT\d{2}$/.test(destination)) {
+      if (!italiaAdded) { countries.push('Italia'); italiaAdded = true; }
+    } else {
+      countries.push(destination);
+    }
+  }
+  res.json(countries.sort((a, b) => a.localeCompare(b, 'es')));
 });
 
 module.exports = router;

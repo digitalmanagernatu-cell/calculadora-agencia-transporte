@@ -37,8 +37,6 @@ const COL_TO_ZONE = {
 const COUNTRY_ZONE_MAPPINGS = [
   { zone: 'Francia y Mónaco',                         countries: ['Francia', 'Mónaco', 'Monaco'] },
   { zone: 'Alemania',                                  countries: ['Alemania'] },
-  { zone: 'Italia Zona 1',                             countries: ['Italia Zona 1'] },
-  { zone: 'Italia Zona 2',                             countries: ['Italia Zona 2'] },
   { zone: 'Bélgica, Holanda y Luxemburgo',             countries: ['Bélgica', 'Belgica', 'Holanda', 'Países Bajos', 'Luxemburgo'] },
   { zone: 'Gran Bretaña',                              countries: ['Gran Bretaña', 'Reino Unido', 'Gran Bretana', 'Inglaterra'] },
   { zone: 'Northern Ireland & Republic of Ireland',    countries: ['Irlanda', 'Irlanda del Norte'] },
@@ -56,6 +54,23 @@ const COUNTRY_ZONE_MAPPINGS = [
   { zone: 'Suecia',                                    countries: ['Suecia'] },
 ];
 
+// Italia: zone determined by CAP prefix (2-digit)
+// Zona 1 → norte y centro-norte: 10-59
+// Zona 2 → centro-sur, sur e islas: 00-09, 60-67, 70-76, 80-89, 90-98
+function buildItalyCapMappings() {
+  const mappings = [];
+  for (let i = 10; i <= 59; i++) {
+    mappings.push({ scope: 'internacional', zone: 'Italia Zona 1', destination: 'IT' + String(i).padStart(2, '0') });
+  }
+  const zona2Ranges = [[0, 9], [60, 67], [70, 76], [80, 89], [90, 98]];
+  for (const [from, to] of zona2Ranges) {
+    for (let i = from; i <= to; i++) {
+      mappings.push({ scope: 'internacional', zone: 'Italia Zona 2', destination: 'IT' + String(i).padStart(2, '0') });
+    }
+  }
+  return mappings;
+}
+
 function buildZoneMappings() {
   const result = [];
   for (const { zone, countries } of COUNTRY_ZONE_MAPPINGS) {
@@ -63,6 +78,7 @@ function buildZoneMappings() {
       result.push({ scope: 'internacional', zone, destination: country });
     }
   }
+  result.push(...buildItalyCapMappings());
   return result;
 }
 
