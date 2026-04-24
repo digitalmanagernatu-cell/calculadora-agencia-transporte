@@ -59,6 +59,18 @@ const CP_PREFIX_TO_PROVINCE = {
   '52': 'MELILLA',
 };
 
+// Origin: Murcia (prefix '30')
+// Nacex Provincial = same province; Regional = adjacent provinces
+const NACEX_ORIGIN_PREFIX = '30';
+const NACEX_REGIONAL_PREFIXES = new Set([
+  '02', // Albacete
+  '03', // Alicante
+  '04', // Almería
+  '18', // Granada
+  '23', // Jaén
+  '46', // Valencia
+]);
+
 // Normalize for comparison
 function normalize(str) {
   return String(str).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
@@ -74,10 +86,11 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
     const isPortuguese = cpStr.length === 4;
     const prefix = cpStr.substring(0, 2);
 
-    // For NACEX: no zone_mappings, always use 'Nacional Peninsular+Andorra'
-    // Canarias (35, 38) not covered. For Portuguese CPs, Nacex covers peninsular Portugal.
+    // For NACEX: zone depends on proximity to origin (Murcia)
     if (normalize(agencyName) === 'NACEX') {
-      if (!isPortuguese && ['35', '38'].includes(prefix)) return null;
+      if (!isPortuguese && ['35', '38'].includes(prefix)) return null; // Canarias: no cubierto
+      if (prefix === NACEX_ORIGIN_PREFIX) return 'Provincial';
+      if (!isPortuguese && NACEX_REGIONAL_PREFIXES.has(prefix)) return 'Regional';
       return 'Nacional Peninsular+Andorra';
     }
 
