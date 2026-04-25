@@ -1,32 +1,56 @@
 const XLSX = require('xlsx');
 
-// Sheet: NATUAROMA 2026
-// Price table header: Excel row 115 = idx 114; data rows Excel 115-143 = idx 114-142
-// Zone columns (0-based): B=1(weight), C=2(ZonaP), D=3(Z1), E=4(Z2), F=5(Z3), G=6(Z4), H=7(Z5), I=8(Z6), J=9(B2), K=10(PT3), L=11(PT4), N=13(R1), O=14(AEREO), P=15(MAR)
+// Dynamic parser: auto-detects header row and zone columns instead of
+// relying on hardcoded row indices that break when the file layout changes.
 
-const PRICE_HEADER_IDX = 114; // Excel row 115
-const PRICE_DATA_END_IDX = 142; // Excel row 143
-const WEIGHT_COL = 1; // column B
-
-const ZONE_COLS = [
-  { col: 2,  zone: 'Zona P' },
-  { col: 3,  zone: 'Zona 1' },
-  { col: 4,  zone: 'Zona 2' },
-  { col: 5,  zone: 'Zona 3' },
-  { col: 6,  zone: 'Zona 4' },
-  { col: 7,  zone: 'Zona 5' },
-  { col: 8,  zone: 'Zona 6' },
-  { col: 9,  zone: 'B2' },
-  { col: 10, zone: 'PT3' },
-  { col: 11, zone: 'PT4' },
-  { col: 13, zone: 'R1' },
-  { col: 14, zone: 'AEREO' },
-  { col: 15, zone: 'MAR' },
+// Canonical zone names keyed by normalized header text patterns
+const ZONE_NAME_MAP = [
+  { pattern: /^zona\s*p(rovincial)?$/i,  zone: 'Zona P' },
+  { pattern: /^zona?\s*1$/i,             zone: 'Zona 1' },
+  { pattern: /^zona?\s*2$/i,             zone: 'Zona 2' },
+  { pattern: /^zona?\s*3$/i,             zone: 'Zona 3' },
+  { pattern: /^zona?\s*4$/i,             zone: 'Zona 4' },
+  { pattern: /^zona?\s*5$/i,             zone: 'Zona 5' },
+  { pattern: /^zona?\s*6$/i,             zone: 'Zona 6' },
+  { pattern: /^b\s*2$/i,                 zone: 'B2'     },
+  { pattern: /^pt\s*3$/i,                zone: 'PT3'    },
+  { pattern: /^pt\s*4$/i,                zone: 'PT4'    },
+  { pattern: /^r\s*1$/i,                 zone: 'R1'     },
+  { pattern: /^a[eé]r[eo]/i,             zone: 'AEREO'  },
+  { pattern: /^mar/i,                    zone: 'MAR'    },
 ];
 
+function normalizeHeader(val) {
+  return String(val ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+function matchZoneName(val) {
+  const s = normalizeHeader(val);
+  if (!s) return null;
+  for (const { pattern, zone } of ZONE_NAME_MAP) {
+    if (pattern.test(s)) return zone;
+  }
+  return null;
+}
+
+// Find the header row: first row with >= 3 recognisable zone-name cells
+function findHeaderRow(rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    let hits = 0;
+    for (const cell of row) {
+      if (matchZoneName(cell)) hits++;
+    }
+    if (hits >= 3) return i;
+  }
+  return -1;
+}
+
 // Hardcoded zone → CP 2-digit prefixes
-// PT3: Portugal Lisboa (10-21, 25-29), Porto (40-49)
-// PT4: Resto Portugal (22-24, 30-38, 50-64, 70-89)
 function buildZoneMappings() {
   const mappings = {
     'Zona P': ['30'],
@@ -39,15 +63,12 @@ function buildZoneMappings() {
     'B2':     ['07'],
   };
 
-  // PT3: Lisboa 10-21, 25-29; Porto 40-49
-  // Prefix stored as "PT" + 2-digit to avoid collision with Spanish CPs (e.g. PT10 ≠ 10)
   const pt3Prefixes = [];
   for (let i = 10; i <= 21; i++) pt3Prefixes.push('PT' + String(i).padStart(2, '0'));
   for (let i = 25; i <= 29; i++) pt3Prefixes.push('PT' + String(i).padStart(2, '0'));
   for (let i = 40; i <= 49; i++) pt3Prefixes.push('PT' + String(i).padStart(2, '0'));
   mappings['PT3'] = pt3Prefixes;
 
-  // PT4: 22-24, 30-38, 50-64, 70-89
   const pt4Prefixes = [];
   for (let i = 22; i <= 24; i++) pt4Prefixes.push('PT' + String(i).padStart(2, '0'));
   for (let i = 30; i <= 38; i++) pt4Prefixes.push('PT' + String(i).padStart(2, '0'));
@@ -66,42 +87,72 @@ function buildZoneMappings() {
 
 function parse(filePath) {
   const wb = XLSX.readFile(filePath);
-  const sheetName = wb.SheetNames.find(n => n.includes('NATUAROMA') || n.includes('2026')) || wb.SheetNames[0];
+  const sheetName =
+    wb.SheetNames.find(n => /NATUAROMA|2026|REDUR|NACIONAL/i.test(n)) ||
+    wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
+  const headerIdx = findHeaderRow(rows);
+  if (headerIdx === -1) {
+    return {
+      rates: [],
+      zoneMappings: buildZoneMappings(),
+      warning: 'No se encontró la cabecera de zonas en el archivo Redur nacional.',
+    };
+  }
+
+  // Map column index → canonical zone name
+  const headerRow = rows[headerIdx];
+  const zoneCols = [];
+  for (let c = 0; c < headerRow.length; c++) {
+    const zone = matchZoneName(headerRow[c]);
+    if (zone) zoneCols.push({ col: c, zone });
+  }
+
+  // Weight column: the last non-zone, non-empty column to the left of the first zone col
+  const firstZoneCol = zoneCols.length > 0 ? zoneCols[0].col : 1;
+  let weightCol = firstZoneCol - 1;
+  // Walk left to find a column with numeric-looking data in data rows
+  for (let c = firstZoneCol - 1; c >= 0; c--) {
+    const sample = rows[headerIdx + 1]?.[c];
+    if (sample !== null && sample !== undefined && !isNaN(parseFloat(sample))) {
+      weightCol = c;
+      break;
+    }
+  }
+
   const extraPerKg = {};
   const ratesByZone = {};
-  ZONE_COLS.forEach(({ zone }) => { ratesByZone[zone] = []; });
+  zoneCols.forEach(({ zone }) => { ratesByZone[zone] = []; });
 
-  for (let i = PRICE_HEADER_IDX + 1; i <= PRICE_DATA_END_IDX && i < rows.length; i++) {
+  for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
 
-    const rawWeight = row[WEIGHT_COL];
+    const rawWeight = row[weightCol];
     if (rawWeight === null || rawWeight === undefined) continue;
 
-    const weightStr = String(rawWeight).trim();
+    const weightStr = String(rawWeight).trim().toLowerCase();
+    if (!weightStr) continue;
 
-    // Detect extra_per_kg row: '>1000', '>X', 'más de'
     const isExtraRow =
       weightStr.includes('>') ||
-      weightStr.toLowerCase().includes('más');
+      weightStr.includes('más') ||
+      weightStr.includes('mas de');
 
     if (isExtraRow) {
-      for (const { col, zone } of ZONE_COLS) {
+      for (const { col, zone } of zoneCols) {
         const price = parseFloat(row[col]);
-        if (!isNaN(price) && price > 0) {
-          extraPerKg[zone] = price;
-        }
+        if (!isNaN(price) && price > 0) extraPerKg[zone] = price;
       }
       continue;
     }
 
-    const weight = parseFloat(rawWeight);
+    const weight = parseFloat(String(rawWeight).replace(',', '.'));
     if (isNaN(weight) || weight <= 0) continue;
 
-    for (const { col, zone } of ZONE_COLS) {
+    for (const { col, zone } of zoneCols) {
       const price = parseFloat(row[col]);
       if (!isNaN(price) && price > 0) {
         ratesByZone[zone].push({
@@ -115,9 +166,8 @@ function parse(filePath) {
     }
   }
 
-  // Flatten and attach extra_per_kg to last tier
   const rates = [];
-  for (const { zone } of ZONE_COLS) {
+  for (const { zone } of zoneCols) {
     const zoneRates = ratesByZone[zone];
     if (zoneRates.length > 0 && extraPerKg[zone] !== undefined) {
       zoneRates[zoneRates.length - 1].extra_per_kg = extraPerKg[zone];
@@ -125,9 +175,15 @@ function parse(filePath) {
     rates.push(...zoneRates);
   }
 
-  const zoneMappings = buildZoneMappings();
+  if (rates.length === 0) {
+    return {
+      rates: [],
+      zoneMappings: buildZoneMappings(),
+      warning: 'No se encontraron tarifas en el archivo. Verifica que las columnas de zona tienen los encabezados correctos.',
+    };
+  }
 
-  return { rates, zoneMappings };
+  return { rates, zoneMappings: buildZoneMappings() };
 }
 
 module.exports = { parse };
