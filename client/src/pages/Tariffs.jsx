@@ -125,6 +125,7 @@ export default function Tariffs() {
           <TariffTable
             rates={tariffData?.rates || []}
             zoneMappings={tariffData?.zoneMappings || []}
+            isPaletBased={tariffData?.isPaletBased || false}
           />
         )}
       </div>

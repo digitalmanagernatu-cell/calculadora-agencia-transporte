@@ -46,6 +46,25 @@ function initSchema() {
       FOREIGN KEY(agency_id) REFERENCES agencies(id)
     );
 
+    CREATE TABLE IF NOT EXISTS palemania_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agency_id INTEGER NOT NULL,
+      zone TEXT NOT NULL,
+      palet_type TEXT NOT NULL,
+      max_kg_per_palet INTEGER NOT NULL,
+      num_pales INTEGER NOT NULL,
+      price_per_palet REAL NOT NULL,
+      FOREIGN KEY(agency_id) REFERENCES agencies(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS palemania_zone_mappings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agency_id INTEGER NOT NULL,
+      zone TEXT NOT NULL,
+      destination TEXT NOT NULL,
+      FOREIGN KEY(agency_id) REFERENCES agencies(id)
+    );
+
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL

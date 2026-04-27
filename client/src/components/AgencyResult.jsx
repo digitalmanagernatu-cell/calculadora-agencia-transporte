@@ -1,4 +1,4 @@
-export default function AgencyResult({ agency_name, zone, price, scope, notes, isBest }) {
+export default function AgencyResult({ agency_name, zone, price, scope, notes, zone_note, isBest }) {
   return (
     <div className={`p-4 rounded-lg border-2 transition-all ${
       isBest
@@ -19,7 +19,10 @@ export default function AgencyResult({ agency_name, zone, price, scope, notes, i
             <span className="font-medium text-gray-600">Zona:</span> {zone}
           </div>
           {notes && (
-            <div className="mt-1 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">{notes}</div>
+            <div className="mt-1 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 font-medium">{notes}</div>
+          )}
+          {zone_note && (
+            <div className="mt-1 text-xs text-yellow-800 bg-yellow-50 border border-yellow-200 rounded px-2 py-1">{zone_note}</div>
           )}
         </div>
         <div className="text-right flex-shrink-0">

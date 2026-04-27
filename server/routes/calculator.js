@@ -180,6 +180,73 @@ function calculatePrice(weightKg, tiers) {
   return Math.round(price * 100) / 100;
 }
 
+// Resolve postal code → Palemanía zone
+function cpToZonePalemania(cp) {
+  const cpStr = String(cp).replace(/\D/g, '');
+  const prefix = parseInt(cpStr.substring(0, 2), 10);
+  const cpNum = parseInt(cpStr, 10);
+
+  // Canarias Islas Menores (zona 11) — must come before zona 10
+  if ((cpNum >= 35500 && cpNum <= 35660) || (cpNum >= 38700 && cpNum <= 38917)) return '11';
+  // Canarias principales (zona 10)
+  if ((cpNum >= 35001 && cpNum <= 35489) || (cpNum >= 38001 && cpNum <= 38690)) return '10';
+  // Baleares (zona 9) — excluir CP 07860 y 07870-07872
+  if (prefix === 7 && cpNum !== 7860 && !(cpNum >= 7870 && cpNum <= 7872)) return '9';
+
+  const zoneMap = {
+    30: '0',
+    3: '1', 12: '1', 46: '1',
+    2: '2', 4: '2', 14: '2', 18: '2', 23: '2',
+    11: '3', 13: '3', 16: '3', 19: '3', 21: '3',
+    28: '3', 29: '3', 41: '3', 42: '3', 45: '3',
+    5: '4', 9: '4', 26: '4', 40: '4', 47: '4', 50: '4',
+    1: '5', 6: '5', 39: '5', 20: '5', 22: '5',
+    24: '5', 25: '5', 31: '5', 34: '5', 37: '5',
+    43: '5', 44: '5', 48: '5', 49: '5',
+    33: '6', 8: '6', 10: '6',
+    15: '7', 17: '7', 27: '7', 32: '7', 36: '7',
+  };
+
+  return zoneMap[prefix] || null;
+}
+
+// Find the cheapest palet combination that covers weight_kg for the given Palemanía zone.
+// Returns:
+//   { noRates: true }   — no rows exist in palemania_rates for this zone (file not loaded)
+//   null                — rows exist but weight exceeds all available capacities
+//   { palet_type, ... } — best matching combination
+function calcPalemania(weightKg, zone) {
+  const rows = db.prepare(`
+    SELECT palet_type, max_kg_per_palet, num_pales, price_per_palet
+    FROM palemania_rates
+    WHERE agency_id = (SELECT id FROM agencies WHERE name = 'PALEMANIA')
+    AND zone = ?
+  `).all(zone);
+
+  if (rows.length === 0) return { noRates: true };
+
+  let best = null;
+
+  for (const row of rows) {
+    const capacity = row.max_kg_per_palet * row.num_pales;
+    if (capacity >= weightKg) {
+      const total_price = row.price_per_palet * row.num_pales;
+      if (!best || total_price < best.total_price) {
+        best = {
+          palet_type: row.palet_type,
+          num_pales: row.num_pales,
+          max_kg_per_palet: row.max_kg_per_palet,
+          price_per_palet: row.price_per_palet,
+          total_price: Math.round(total_price * 100) / 100,
+          capacity_kg: capacity,
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
 // POST /api/calculator/quote
 router.post('/quote', (req, res) => {
   const { weight_kg, destination_type, postal_code, country } = req.body;
@@ -204,6 +271,78 @@ router.post('/quote', (req, res) => {
   const notCovered = [];
 
   for (const agency of agencies) {
+    // Palemanía uses palet-based pricing — handled separately
+    if (normalize(agency.name) === 'PALEMANIA') {
+      // No international coverage except Portugal (zones 8, 12, 13)
+      if (destination_type === 'internacional') {
+        const normCountry = normalize(country || '');
+        let intlZone = null;
+        if (normCountry === 'PORTUGAL') intlZone = '8';
+        else if (normCountry === 'MADEIRA') intlZone = '12';
+        else if (normCountry === 'AZORES' || normCountry === 'SAO MIGUEL' || normCountry === 'SÃO MIGUEL') intlZone = '13';
+
+        if (!intlZone) {
+          notCovered.push({ agency: agency.display_name, reason: 'Palemanía: solo cubre nacional, Portugal, Baleares y Canarias' });
+          continue;
+        }
+        const result = calcPalemania(weightKg, intlZone);
+        if (result?.noRates) {
+          notCovered.push({ agency: agency.display_name, reason: 'Sin tarifas cargadas — subir palemania_2026.xlsx en Gestión de tarifas' });
+          continue;
+        }
+        if (!result) {
+          notCovered.push({ agency: agency.display_name, reason: `Peso ${weightKg} kg supera la capacidad máxima disponible` });
+          continue;
+        }
+        results.push({
+          agency_name: agency.display_name,
+          zone: `Zona ${intlZone}`,
+          weight_billed_kg: weightKg,
+          price: result.total_price,
+          scope: destination_type,
+          notes: `${result.num_pales} palet${result.num_pales > 1 ? 's' : ''} ${result.palet_type} (máx. ${result.max_kg_per_palet} kg/pale)`,
+          zone_note: '',
+        });
+        continue;
+      }
+
+      // Nacional
+      const cpStr = String(postal_code).replace(/\D/g, '');
+      const isPortuguese = cpStr.length === 4;
+      let zone;
+      if (isPortuguese) {
+        zone = '8'; // Portugal peninsular
+      } else {
+        zone = cpToZonePalemania(cpStr);
+      }
+
+      if (!zone) {
+        notCovered.push({ agency: agency.display_name, reason: 'Destino no cubierto por Palemanía' });
+        continue;
+      }
+
+      const result = calcPalemania(weightKg, zone);
+      if (result?.noRates) {
+        notCovered.push({ agency: agency.display_name, reason: 'Sin tarifas cargadas — subir palemania_2026.xlsx en Gestión de tarifas' });
+        continue;
+      }
+      if (!result) {
+        notCovered.push({ agency: agency.display_name, reason: `Peso ${weightKg} kg supera la capacidad máxima disponible` });
+        continue;
+      }
+
+      results.push({
+        agency_name: agency.display_name,
+        zone: `Zona ${zone}`,
+        weight_billed_kg: weightKg,
+        price: result.total_price,
+        scope: destination_type,
+        notes: `${result.num_pales} palet${result.num_pales > 1 ? 's' : ''} ${result.palet_type} (máx. ${result.max_kg_per_palet} kg/pale)`,
+        zone_note: zone === '7' ? '⚠️ Confirmar con Palemanía si aplica zona 7.1 (+18%)' : '',
+      });
+      continue;
+    }
+
     // Check if agency has tariffs for this scope
     const hasTariff = db.prepare(
       'SELECT COUNT(*) as c FROM tariff_rates WHERE agency_id = ? AND scope = ?'

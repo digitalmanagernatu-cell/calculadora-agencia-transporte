@@ -34,7 +34,7 @@ function getParser(agencyName, scope) {
   if (name === 'REDUR' && scope === 'ambas') return null; // handled specially
   if (name === 'TRANSAHER') return require('../parsers/transaher');
   if (name === 'NACEX') return require('../parsers/nacex');
-  if (name.includes('PALEMA')) return require('../parsers/palemani');
+  if (name === 'PALEMANIA') return require('../parsers/palemania');
   return require('../parsers/generic');
 }
 
@@ -43,6 +43,21 @@ router.get('/', (req, res) => {
   const { agency_id, scope } = req.query;
   if (!agency_id || !scope) {
     return res.status(400).json({ error: 'Se requieren agency_id y scope' });
+  }
+
+  const agency = db.prepare('SELECT * FROM agencies WHERE id = ?').get(agency_id);
+
+  if (agency && agency.name === 'PALEMANIA') {
+    const rates = db.prepare(
+      'SELECT * FROM palemania_rates WHERE agency_id = ? ORDER BY zone ASC, max_kg_per_palet ASC, num_pales ASC'
+    ).all(agency_id);
+    const zoneMappings = db.prepare(
+      'SELECT * FROM palemania_zone_mappings WHERE agency_id = ? ORDER BY zone ASC'
+    ).all(agency_id);
+    const lastFile = db.prepare(
+      "SELECT uploaded_at, filename FROM tariff_files WHERE agency_id = ? AND (scope = ? OR scope = 'ambas') ORDER BY uploaded_at DESC LIMIT 1"
+    ).get(agency_id, scope);
+    return res.json({ rates, zoneMappings, lastUpdated: lastFile?.uploaded_at || null, isPaletBased: true });
   }
 
   const rates = db.prepare(
@@ -54,7 +69,7 @@ router.get('/', (req, res) => {
   ).all(agency_id, scope);
 
   const lastFile = db.prepare(
-    'SELECT uploaded_at, filename FROM tariff_files WHERE agency_id = ? AND (scope = ? OR scope = \'ambas\') ORDER BY uploaded_at DESC LIMIT 1'
+    "SELECT uploaded_at, filename FROM tariff_files WHERE agency_id = ? AND (scope = ? OR scope = 'ambas') ORDER BY uploaded_at DESC LIMIT 1"
   ).get(agency_id, scope);
 
   res.json({ rates, zoneMappings, lastUpdated: lastFile?.uploaded_at || null });
@@ -70,15 +85,26 @@ router.get('/export', (req, res) => {
   const agency = db.prepare('SELECT * FROM agencies WHERE id = ?').get(agency_id);
   if (!agency) return res.status(404).json({ error: 'Agencia no encontrada' });
 
-  const rates = db.prepare(
-    'SELECT zone, weight_max_kg, price, extra_per_kg FROM tariff_rates WHERE agency_id = ? AND scope = ? ORDER BY zone ASC, weight_max_kg ASC'
-  ).all(agency_id, scope);
+  let wsData;
+  if (agency.name === 'PALEMANIA') {
+    const rates = db.prepare(
+      'SELECT zone, palet_type, max_kg_per_palet, num_pales, price_per_palet FROM palemania_rates WHERE agency_id = ? ORDER BY zone ASC, max_kg_per_palet ASC, num_pales ASC'
+    ).all(agency_id);
+    wsData = [['Zona', 'Tipo palet', 'Máx kg/pale', 'Nº pales', 'Precio/pale (€)', 'Precio total (€)']];
+    for (const r of rates) {
+      wsData.push([r.zone, r.palet_type, r.max_kg_per_palet, r.num_pales, r.price_per_palet, +(r.price_per_palet * r.num_pales).toFixed(2)]);
+    }
+  } else {
+    const rates = db.prepare(
+      'SELECT zone, weight_max_kg, price, extra_per_kg FROM tariff_rates WHERE agency_id = ? AND scope = ? ORDER BY zone ASC, weight_max_kg ASC'
+    ).all(agency_id, scope);
+    wsData = [['Zona', 'Peso máx (kg)', 'Precio (€)', 'Extra por kg (€)']];
+    for (const r of rates) {
+      wsData.push([r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? '']);
+    }
+  }
 
   const wb = XLSX.utils.book_new();
-  const wsData = [['Zona', 'Peso máx (kg)', 'Precio (€)', 'Extra por kg (€)']];
-  for (const r of rates) {
-    wsData.push([r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? '']);
-  }
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   XLSX.utils.book_append_sheet(wb, ws, 'Tarifas');
 
@@ -106,10 +132,11 @@ router.post('/upload', upload.single('file'), (req, res) => {
 
   let agencyId = agency_id ? parseInt(agency_id) : null;
   let agencyName;
+  let totalRecords = 0;
+  let warning = null;
 
   try {
     if (!agencyId && new_agency_name) {
-      // Create new agency
       const normalized = new_agency_name.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
       const displayName = new_agency_name.trim().charAt(0).toUpperCase() + new_agency_name.trim().slice(1).toLowerCase();
       const result = db.prepare('INSERT INTO agencies (name, display_name) VALUES (?, ?)').run(normalized, displayName);
@@ -121,64 +148,97 @@ router.post('/upload', upload.single('file'), (req, res) => {
       agencyName = agency.name;
     }
 
-    // Determine scopes to process
-    const scopesToProcess = scope === 'ambas' ? ['nacional', 'internacional'] : [scope];
-    let totalRecords = 0;
-    let warning = null;
+    if (agencyName === 'PALEMANIA') {
+      const parser = require('../parsers/palemania');
+      const parsed = parser.parse(req.file.path);
+      if (parsed.warning) warning = parsed.warning;
 
-    const doImport = db.transaction(() => {
-      for (const currentScope of scopesToProcess) {
-        // Delete existing data for this agency+scope
-        db.prepare('DELETE FROM tariff_rates WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
-        db.prepare('DELETE FROM zone_mappings WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
-        db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
+      if (parsed.rates.length === 0) {
+        // Don't wipe existing data when the parser found nothing
+        return res.json({
+          success: false,
+          recordsInserted: 0,
+          warning: warning || 'No se encontraron tarifas en el archivo.',
+        });
+      }
 
-        // Get parser
-        let parser;
-        if (scope === 'ambas') {
-          parser = getParser(agencyName, 'ambas') || require('../parsers/transaher');
-        } else {
-          parser = getParser(agencyName, currentScope);
-        }
-
-        let parsed;
-        if (scope === 'ambas' && currentScope === 'nacional') {
-          // For ambas, parse once and split by scope
-          parsed = parser.parse(req.file.path);
-        } else if (scope === 'ambas' && currentScope === 'internacional') {
-          // Already parsed above, reuse
-          parsed = parser.parse(req.file.path);
-        } else {
-          parsed = parser.parse(req.file.path);
-        }
-
-        if (parsed.warning) warning = parsed.warning;
-
-        const filteredRates = parsed.rates.filter(r => r.scope === currentScope);
-        const filteredMappings = parsed.zoneMappings.filter(m => m.scope === currentScope);
+      const doImport = db.transaction(() => {
+        // Clean up both palet-specific and any stale generic data
+        db.prepare('DELETE FROM palemania_rates WHERE agency_id = ?').run(agencyId);
+        db.prepare('DELETE FROM palemania_zone_mappings WHERE agency_id = ?').run(agencyId);
+        db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(agencyId);
+        db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(agencyId);
+        db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(agencyId);
 
         const insertRate = db.prepare(
-          'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+          'INSERT INTO palemania_rates (agency_id, zone, palet_type, max_kg_per_palet, num_pales, price_per_palet) VALUES (?, ?, ?, ?, ?, ?)'
         );
         const insertMapping = db.prepare(
-          'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+          'INSERT INTO palemania_zone_mappings (agency_id, zone, destination) VALUES (?, ?, ?)'
         );
         const insertFile = db.prepare(
           'INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)'
         );
 
-        for (const r of filteredRates) {
-          insertRate.run(agencyId, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+        for (const r of parsed.rates) {
+          insertRate.run(agencyId, r.zone, r.palet_type, r.max_kg_per_palet, r.num_pales, r.price_per_palet);
           totalRecords++;
         }
-        for (const m of filteredMappings) {
-          insertMapping.run(agencyId, m.scope, m.zone, m.destination);
+        for (const m of parsed.zoneMappings) {
+          insertMapping.run(agencyId, m.zone, m.destination);
         }
-        insertFile.run(agencyId, currentScope, req.file.filename);
-      }
-    });
+        insertFile.run(agencyId, 'nacional', req.file.filename);
+      });
 
-    doImport();
+      doImport();
+      if (totalRecords === 0 && !warning) {
+        warning = 'No se encontraron tarifas en el archivo. Comprueba que la hoja tiene el formato esperado (cabecera en fila 1, zonas 0–13 en filas 2–16, precios en columnas B–T).';
+      }
+    } else {
+      const scopesToProcess = scope === 'ambas' ? ['nacional', 'internacional'] : [scope];
+
+      const doImport = db.transaction(() => {
+        for (const currentScope of scopesToProcess) {
+          db.prepare('DELETE FROM tariff_rates WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
+          db.prepare('DELETE FROM zone_mappings WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
+          db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
+
+          let parser;
+          if (scope === 'ambas') {
+            parser = getParser(agencyName, 'ambas') || require('../parsers/transaher');
+          } else {
+            parser = getParser(agencyName, currentScope);
+          }
+
+          const parsed = parser.parse(req.file.path);
+          if (parsed.warning) warning = parsed.warning;
+
+          const filteredRates = parsed.rates.filter(r => r.scope === currentScope);
+          const filteredMappings = parsed.zoneMappings.filter(m => m.scope === currentScope);
+
+          const insertRate = db.prepare(
+            'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+          );
+          const insertMapping = db.prepare(
+            'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+          );
+          const insertFile = db.prepare(
+            'INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)'
+          );
+
+          for (const r of filteredRates) {
+            insertRate.run(agencyId, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+            totalRecords++;
+          }
+          for (const m of filteredMappings) {
+            insertMapping.run(agencyId, m.scope, m.zone, m.destination);
+          }
+          insertFile.run(agencyId, currentScope, req.file.filename);
+        }
+      });
+
+      doImport();
+    }
 
     res.json({
       success: true,
