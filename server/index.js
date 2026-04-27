@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_PATH)) {
 }
 
 // Increment this when parsers or zone mappings change — forces a full reseed
-const SEED_VERSION = 4;
+const SEED_VERSION = 5;
 
 // Initialize DB schema
 initSchema();
@@ -47,6 +47,9 @@ async function seedInitialData() {
   ];
 
   for (const seed of seedList) {
+    // Always upsert the agency so it exists in the DB even if the file is missing
+    db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run(seed.agencyName, seed.displayName);
+
     const filePath = path.join(INITIAL_DATA_PATH, seed.file);
     if (!fs.existsSync(filePath)) {
       console.warn(`[seed] Archivo no encontrado, omitiendo: ${filePath}`);
@@ -54,8 +57,6 @@ async function seedInitialData() {
     }
 
     try {
-      // Upsert agency (REDUR appears twice)
-      db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run(seed.agencyName, seed.displayName);
       const agency = db.prepare('SELECT id FROM agencies WHERE name = ?').get(seed.agencyName);
       const agencyId = agency.id;
 
