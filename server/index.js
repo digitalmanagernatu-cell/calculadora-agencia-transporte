@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_PATH)) {
 }
 
 // Increment this when parsers or zone mappings change — forces a full reseed
-const SEED_VERSION = 5;
+const SEED_VERSION = 6;
 
 // Initialize DB schema
 initSchema();
@@ -84,7 +84,9 @@ async function seedInitialData() {
         const doInsert = db.transaction(() => {
           db.prepare('DELETE FROM palemania_rates WHERE agency_id = ?').run(agencyId);
           db.prepare('DELETE FROM palemania_zone_mappings WHERE agency_id = ?').run(agencyId);
-          db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agencyId, 'nacional');
+          db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(agencyId);
+          db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(agencyId);
+          db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(agencyId);
 
           const insertRate = db.prepare(
             'INSERT INTO palemania_rates (agency_id, zone, palet_type, max_kg_per_palet, num_pales, price_per_palet) VALUES (?, ?, ?, ?, ?, ?)'
