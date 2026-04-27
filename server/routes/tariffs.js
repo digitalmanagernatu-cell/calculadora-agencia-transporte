@@ -153,6 +153,15 @@ router.post('/upload', upload.single('file'), (req, res) => {
       const parsed = parser.parse(req.file.path);
       if (parsed.warning) warning = parsed.warning;
 
+      if (parsed.rates.length === 0) {
+        // Don't wipe existing data when the parser found nothing
+        return res.json({
+          success: false,
+          recordsInserted: 0,
+          warning: warning || 'No se encontraron tarifas en el archivo.',
+        });
+      }
+
       const doImport = db.transaction(() => {
         // Clean up both palet-specific and any stale generic data
         db.prepare('DELETE FROM palemania_rates WHERE agency_id = ?').run(agencyId);
