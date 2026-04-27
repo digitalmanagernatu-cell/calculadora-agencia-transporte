@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_PATH)) {
 }
 
 // Increment this when parsers or zone mappings change — forces a full reseed
-const SEED_VERSION = 3;
+const SEED_VERSION = 4;
 
 // Initialize DB schema
 initSchema();
@@ -43,6 +43,7 @@ async function seedInitialData() {
     { file: 'redur internacional 2026.xlsx', agencyName: 'REDUR',     displayName: 'Redur',    scope: 'internacional' },
     { file: 'transaher 2026.xlsx',           agencyName: 'TRANSAHER', displayName: 'Transaher', scope: 'ambas' },
     { file: 'nacex 2026.xlsx',              agencyName: 'NACEX',     displayName: 'Nacex',    scope: 'nacional' },
+    { file: 'palemania_2026.xlsx',          agencyName: 'PALEMANIA', displayName: 'Palemanía', scope: 'nacional' },
   ];
 
   for (const seed of seedList) {
@@ -69,6 +70,8 @@ async function seedInitialData() {
         parser = require('./parsers/transaher');
       } else if (seed.agencyName === 'NACEX') {
         parser = require('./parsers/nacex');
+      } else if (seed.agencyName === 'PALEMANIA') {
+        parser = require('./parsers/palemania');
       } else {
         parser = require('./parsers/generic');
       }
@@ -76,36 +79,62 @@ async function seedInitialData() {
       const parsed = parser.parse(filePath);
       if (parsed.warning) console.warn(`[seed] ${seed.file}: ${parsed.warning}`);
 
-      const doInsert = db.transaction(() => {
-        for (const currentScope of scopesToProcess) {
-          db.prepare('DELETE FROM tariff_rates WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
-          db.prepare('DELETE FROM zone_mappings WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
-          db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
-
-          const filteredRates = parsed.rates.filter(r => r.scope === currentScope);
-          const filteredMappings = parsed.zoneMappings.filter(m => m.scope === currentScope);
+      if (seed.agencyName === 'PALEMANIA') {
+        const doInsert = db.transaction(() => {
+          db.prepare('DELETE FROM palemania_rates WHERE agency_id = ?').run(agencyId);
+          db.prepare('DELETE FROM palemania_zone_mappings WHERE agency_id = ?').run(agencyId);
+          db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agencyId, 'nacional');
 
           const insertRate = db.prepare(
-            'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO palemania_rates (agency_id, zone, palet_type, max_kg_per_palet, num_pales, price_per_palet) VALUES (?, ?, ?, ?, ?, ?)'
           );
           const insertMapping = db.prepare(
-            'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+            'INSERT INTO palemania_zone_mappings (agency_id, zone, destination) VALUES (?, ?, ?)'
           );
           const insertFile = db.prepare(
             'INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)'
           );
 
-          for (const r of filteredRates) {
-            insertRate.run(agencyId, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+          for (const r of parsed.rates) {
+            insertRate.run(agencyId, r.zone, r.palet_type, r.max_kg_per_palet, r.num_pales, r.price_per_palet);
           }
-          for (const m of filteredMappings) {
-            insertMapping.run(agencyId, m.scope, m.zone, m.destination);
+          for (const m of parsed.zoneMappings) {
+            insertMapping.run(agencyId, m.zone, m.destination);
           }
-          insertFile.run(agencyId, currentScope, seed.file);
-        }
-      });
+          insertFile.run(agencyId, 'nacional', seed.file);
+        });
+        doInsert();
+      } else {
+        const doInsert = db.transaction(() => {
+          for (const currentScope of scopesToProcess) {
+            db.prepare('DELETE FROM tariff_rates WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
+            db.prepare('DELETE FROM zone_mappings WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
+            db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agencyId, currentScope);
 
-      doInsert();
+            const filteredRates = parsed.rates.filter(r => r.scope === currentScope);
+            const filteredMappings = parsed.zoneMappings.filter(m => m.scope === currentScope);
+
+            const insertRate = db.prepare(
+              'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            const insertMapping = db.prepare(
+              'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+            );
+            const insertFile = db.prepare(
+              'INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)'
+            );
+
+            for (const r of filteredRates) {
+              insertRate.run(agencyId, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+            }
+            for (const m of filteredMappings) {
+              insertMapping.run(agencyId, m.scope, m.zone, m.destination);
+            }
+            insertFile.run(agencyId, currentScope, seed.file);
+          }
+        });
+        doInsert();
+      }
       console.log(`[seed] OK: ${seed.file} (${seed.agencyName}, ${seed.scope})`);
     } catch (err) {
       console.error(`[seed] Error procesando ${seed.file}:`, err.message);
