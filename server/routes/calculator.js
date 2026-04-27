@@ -210,7 +210,11 @@ function cpToZonePalemania(cp) {
   return zoneMap[prefix] || null;
 }
 
-// Find the cheapest palet combination that covers weight_kg for the given Palemanía zone
+// Find the cheapest palet combination that covers weight_kg for the given Palemanía zone.
+// Returns:
+//   { noRates: true }   — no rows exist in palemania_rates for this zone (file not loaded)
+//   null                — rows exist but weight exceeds all available capacities
+//   { palet_type, ... } — best matching combination
 function calcPalemania(weightKg, zone) {
   const rows = db.prepare(`
     SELECT palet_type, max_kg_per_palet, num_pales, price_per_palet
@@ -218,6 +222,8 @@ function calcPalemania(weightKg, zone) {
     WHERE agency_id = (SELECT id FROM agencies WHERE name = 'PALEMANIA')
     AND zone = ?
   `).all(zone);
+
+  if (rows.length === 0) return { noRates: true };
 
   let best = null;
 
@@ -280,8 +286,12 @@ router.post('/quote', (req, res) => {
           continue;
         }
         const result = calcPalemania(weightKg, intlZone);
+        if (result?.noRates) {
+          notCovered.push({ agency: agency.display_name, reason: 'Sin tarifas cargadas — subir palemania_2026.xlsx en Gestión de tarifas' });
+          continue;
+        }
         if (!result) {
-          notCovered.push({ agency: agency.display_name, reason: `Peso ${weightKg} kg supera capacidad máxima disponible` });
+          notCovered.push({ agency: agency.display_name, reason: `Peso ${weightKg} kg supera la capacidad máxima disponible` });
           continue;
         }
         results.push({
@@ -312,8 +322,12 @@ router.post('/quote', (req, res) => {
       }
 
       const result = calcPalemania(weightKg, zone);
+      if (result?.noRates) {
+        notCovered.push({ agency: agency.display_name, reason: 'Sin tarifas cargadas — subir palemania_2026.xlsx en Gestión de tarifas' });
+        continue;
+      }
       if (!result) {
-        notCovered.push({ agency: agency.display_name, reason: `Peso ${weightKg} kg supera capacidad máxima disponible` });
+        notCovered.push({ agency: agency.display_name, reason: `Peso ${weightKg} kg supera la capacidad máxima disponible` });
         continue;
       }
 

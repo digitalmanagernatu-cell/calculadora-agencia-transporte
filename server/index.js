@@ -52,7 +52,12 @@ async function seedInitialData() {
 
     const filePath = path.join(INITIAL_DATA_PATH, seed.file);
     if (!fs.existsSync(filePath)) {
-      console.warn(`[seed] Archivo no encontrado, omitiendo: ${filePath}`);
+      if (seed.agencyName === 'PALEMANIA') {
+        console.warn(`[seed] ⚠️  PALEMANIA: archivo de tarifa no encontrado en ${filePath}`);
+        console.warn(`[seed]    → Sin tarifas de Palemanía. Sube el archivo en Gestión de tarifas o cópialo a data/initial/.`);
+      } else {
+        console.warn(`[seed] Archivo no encontrado, omitiendo: ${filePath}`);
+      }
       continue;
     }
 
@@ -146,6 +151,18 @@ async function seedInitialData() {
 
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('seed_version', ?)").run(String(SEED_VERSION));
   console.log(`[seed] Versión de datos actualizada a ${SEED_VERSION}`);
+
+  // Post-seed diagnostic for PALEMANIA
+  try {
+    const palCount = db.prepare('SELECT COUNT(*) as c FROM palemania_rates').get().c;
+    if (palCount === 0) {
+      console.warn('[seed] ⚠️  palemania_rates está vacía. Para activar Palemanía:');
+      console.warn('[seed]    1. Sube palemania_2026.xlsx desde la página Gestión de tarifas, O');
+      console.warn('[seed]    2. Copia el archivo a data/initial/ y reinicia el servidor.');
+    } else {
+      console.log(`[seed] Palemanía: ${palCount} registros de tarifa cargados.`);
+    }
+  } catch (_) { /* tabla puede no existir todavía */ }
 }
 
 seedInitialData().then(() => {
