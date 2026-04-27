@@ -24,13 +24,70 @@ const SEED_VERSION = 6;
 // Initialize DB schema
 initSchema();
 
+// Seed PALEMANIA specifically: fires on every startup when the file is present but rates are missing.
+// This lets the operator simply copy the xlsx to data/initial/ and restart, even after seed_version
+// is already current.
+async function seedPalemaniaIfNeeded() {
+  const palFile = path.join(INITIAL_DATA_PATH, 'palemania_2026.xlsx');
+  if (!fs.existsSync(palFile)) return;
+
+  try {
+    const palCount = db.prepare('SELECT COUNT(*) as c FROM palemania_rates').get().c;
+    if (palCount > 0) return; // already loaded
+  } catch (_) {
+    return; // table may not exist yet; full seed will handle it
+  }
+
+  console.log('[seed] palemania_rates vacía pero archivo presente — cargando Palemanía...');
+  try {
+    db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('PALEMANIA', 'Palemanía');
+    const agency = db.prepare("SELECT id FROM agencies WHERE name = 'PALEMANIA'").get();
+
+    const parser = require('./parsers/palemania');
+    const parsed = parser.parse(palFile);
+    if (parsed.warning) console.warn('[seed] palemania:', parsed.warning);
+
+    const doInsert = db.transaction(() => {
+      db.prepare('DELETE FROM palemania_rates WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM palemania_zone_mappings WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(agency.id);
+
+      const insertRate = db.prepare(
+        'INSERT INTO palemania_rates (agency_id, zone, palet_type, max_kg_per_palet, num_pales, price_per_palet) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      const insertMapping = db.prepare(
+        'INSERT INTO palemania_zone_mappings (agency_id, zone, destination) VALUES (?, ?, ?)'
+      );
+      for (const r of parsed.rates) {
+        insertRate.run(agency.id, r.zone, r.palet_type, r.max_kg_per_palet, r.num_pales, r.price_per_palet);
+      }
+      for (const m of parsed.zoneMappings) {
+        insertMapping.run(agency.id, m.zone, m.destination);
+      }
+      db.prepare('INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)').run(agency.id, 'nacional', 'palemania_2026.xlsx');
+    });
+
+    doInsert();
+    console.log(`[seed] Palemanía: ${parsed.rates.length} tarifas cargadas.`);
+  } catch (err) {
+    console.error('[seed] Error al cargar Palemanía:', err.message);
+  }
+}
+
 // Seed initial data when DB is empty OR seed version has changed
 async function seedInitialData() {
   const stored = db.prepare("SELECT value FROM meta WHERE key = 'seed_version'").get();
   const storedVersion = stored ? parseInt(stored.value, 10) : 0;
   const agencyCount = db.prepare('SELECT COUNT(*) as c FROM agencies').get().c;
 
-  if (agencyCount > 0 && storedVersion >= SEED_VERSION) return;
+  const needsFullSeed = agencyCount === 0 || storedVersion < SEED_VERSION;
+
+  // PALEMANIA re-seed: runs independently whenever the file is present but rates are empty
+  await seedPalemaniaIfNeeded();
+
+  if (!needsFullSeed) return;
 
   if (agencyCount === 0) {
     console.log('[seed] Base de datos vacía, importando tarifas iniciales...');

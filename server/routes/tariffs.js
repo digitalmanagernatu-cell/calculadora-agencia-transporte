@@ -182,6 +182,9 @@ router.post('/upload', upload.single('file'), (req, res) => {
       });
 
       doImport();
+      if (totalRecords === 0 && !warning) {
+        warning = 'No se encontraron tarifas en el archivo. Comprueba que la hoja tiene el formato esperado (cabecera en fila 1, zonas 0–13 en filas 2–16, precios en columnas B–T).';
+      }
     } else {
       const scopesToProcess = scope === 'ambas' ? ['nacional', 'internacional'] : [scope];
 
