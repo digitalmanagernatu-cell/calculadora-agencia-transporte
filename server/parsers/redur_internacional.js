@@ -1,36 +1,30 @@
 const XLSX = require('xlsx');
 
 // Sheet: TARIFA 2026
-// Header row: Excel row 3 = idx 2
-// Data rows: Excel rows 3-48 = idx 2-47
-// Column B (idx 1) = weight; zone columns C-U (idx 2-20)
-
-const HEADER_IDX = 2;   // Excel row 3
-const DATA_END_IDX = 47; // Excel row 48
-const WEIGHT_COL = 1;    // column B
+// Column A (idx 0) = weight in kg (KILOS)
+// Zone price columns B-T (idx 1-19) — 19 country groups
 
 // Map column index (0-based) to zone/country group name
-// Columns 2-20 correspond to the 19 country groups
 const COL_TO_ZONE = {
-  2:  'Francia y Mónaco',
-  3:  'Alemania',
-  4:  'Italia Zona 1',
-  5:  'Italia Zona 2',
-  6:  'Bélgica, Holanda y Luxemburgo',
-  7:  'Gran Bretaña',
-  8:  'Northern Ireland & Republic of Ireland',
-  9:  'Austria',
-  10: 'Suiza y Liechtenstein',
-  11: 'Polonia',
-  12: 'Hungría y Eslovaquia',
-  13: 'República Checa',
-  14: 'Dinamarca',
-  15: 'Croacia',
-  16: 'Bosnia Herzegovina y Serbia',
-  17: 'Montenegro',
-  18: 'Latvia y Lituania',
-  19: 'Finlandia y Estonia',
-  20: 'Suecia',
+  1:  'Francia y Mónaco',
+  2:  'Alemania',
+  3:  'Italia Zona 1',
+  4:  'Italia Zona 2',
+  5:  'Bélgica, Holanda y Luxemburgo',
+  6:  'Gran Bretaña',
+  7:  'Northern Ireland & Republic of Ireland',
+  8:  'Austria',
+  9:  'Suiza y Liechtenstein',
+  10: 'Polonia',
+  11: 'Hungría y Eslovaquia',
+  12: 'República Checa',
+  13: 'Dinamarca',
+  14: 'Croacia',
+  15: 'Bosnia Herzegovina y Serbia',
+  16: 'Montenegro',
+  17: 'Latvia y Lituania',
+  18: 'Finlandia y Estonia',
+  19: 'Suecia',
 };
 
 // Country name(s) → zone (for zone_mappings destination matching)
@@ -68,25 +62,36 @@ function buildZoneMappings() {
 
 function parse(filePath) {
   const wb = XLSX.readFile(filePath);
-  const sheetName = wb.SheetNames.find(n => n.includes('TARIFA') || n.includes('2026')) || wb.SheetNames[0];
+  const sheetName = wb.SheetNames.find(n => /TARIFA|2026/i.test(n)) || wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  // Locate header row: first row (within first 10) where col A matches "kilo" or "kg"
+  let headerIdx = 2; // fallback: original assumption of Excel row 3
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const cell = String(rows[i]?.[0] ?? '').trim();
+    if (/^kilo|^kg$/i.test(cell)) {
+      headerIdx = i;
+      break;
+    }
+  }
 
   const colIndices = Object.keys(COL_TO_ZONE).map(Number);
   const extraPerKg = {};
   const ratesByZone = {};
   colIndices.forEach(c => { ratesByZone[COL_TO_ZONE[c]] = []; });
 
-  for (let i = HEADER_IDX + 1; i <= DATA_END_IDX && i < rows.length; i++) {
+  // Read data rows from headerIdx+1 to end of sheet (up to 70 rows)
+  for (let i = headerIdx + 1; i < Math.min(rows.length, headerIdx + 70); i++) {
     const row = rows[i];
     if (!row) continue;
 
-    const rawWeight = row[WEIGHT_COL];
+    const rawWeight = row[0]; // col A = KILOS
     if (rawWeight === null || rawWeight === undefined) continue;
 
     const weightStr = String(rawWeight).trim().toLowerCase();
 
-    // Detect extra_per_kg row
+    // Detect "extra per kg" row (e.g. "> 500", "Más de 500")
     const isExtraRow =
       weightStr.includes('más') ||
       weightStr.includes('mas de') ||
@@ -94,11 +99,8 @@ function parse(filePath) {
 
     if (isExtraRow) {
       for (const c of colIndices) {
-        const zone = COL_TO_ZONE[c];
         const price = parseFloat(row[c]);
-        if (!isNaN(price) && price > 0) {
-          extraPerKg[zone] = price;
-        }
+        if (!isNaN(price) && price > 0) extraPerKg[COL_TO_ZONE[c]] = price;
       }
       continue;
     }
@@ -107,12 +109,11 @@ function parse(filePath) {
     if (isNaN(weight) || weight <= 0) continue;
 
     for (const c of colIndices) {
-      const zone = COL_TO_ZONE[c];
       const price = parseFloat(row[c]);
       if (!isNaN(price) && price > 0) {
-        ratesByZone[zone].push({
+        ratesByZone[COL_TO_ZONE[c]].push({
           scope: 'internacional',
-          zone,
+          zone: COL_TO_ZONE[c],
           weight_max_kg: weight,
           price,
           extra_per_kg: null,
@@ -121,7 +122,7 @@ function parse(filePath) {
     }
   }
 
-  // Flatten and attach extra_per_kg
+  // Flatten and attach extra_per_kg to last tier of each zone
   const rates = [];
   for (const c of colIndices) {
     const zone = COL_TO_ZONE[c];
