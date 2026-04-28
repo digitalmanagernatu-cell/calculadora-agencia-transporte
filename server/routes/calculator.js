@@ -154,6 +154,38 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
   return null;
 }
 
+// Map French CP (5-digit) → special island pricing or regular zone
+// Francia: Córcega (20) + departments with Atlantic/Mediterranean islands: 17, 22, 29, 50, 56, 83, 85
+// Rate: 1.1527 €/kg, min 34.72 €
+function cpToZoneFrance(cp) {
+  const cpStr = String(cp).replace(/\D/g, '').padStart(5, '0');
+  const prefix = parseInt(cpStr.substring(0, 2), 10);
+  const ISLAND_PREFIXES = new Set([17, 20, 22, 29, 50, 56, 83, 85]);
+  if (ISLAND_PREFIXES.has(prefix)) {
+    return { special: true, rate_per_kg: 1.1527, min_price: 34.72, label: 'Córcega / Islas Francesas' };
+  }
+  return { zone: 'Francia y Mónaco' };
+}
+
+// Map German CP (5-digit) → special island pricing or regular zone
+// Rate: 0.1695 €/kg, min 16.02 €
+const GERMANY_ISLAND_CPS = new Set([
+  25849, 25859,                                                    // Pellworm, Halligen
+  25938, 25942, 25946,                                             // Föhr, Amrum
+  ...Array.from({ length: 20 }, (_, i) => 25980 + i),             // Sylt: 25980-25999
+  26465, 26474, 26486,                                             // Langeoog, Spiekeroog, Wangerooge
+  26548, 26571, 26579, 26757,                                      // Norderney, Juist, Baltrum, Borkum
+  27498,                                                           // Helgoland
+]);
+function cpToZoneGermany(cp) {
+  const cpStr = String(cp).replace(/\D/g, '').padStart(5, '0');
+  const cpNum = parseInt(cpStr, 10);
+  if (GERMANY_ISLAND_CPS.has(cpNum)) {
+    return { special: true, rate_per_kg: 0.1695, min_price: 16.02, label: 'Islas Alemania' };
+  }
+  return { zone: 'Alemania' };
+}
+
 // Map Italian CP (5-digit) to Redur zone or special fixed-price destination
 // Returns: { zone: 'Italia Zona 1' | 'Italia Zona 2' }
 //       or { special: true, price: number, label: string }
@@ -323,7 +355,7 @@ function calcPalemania(weightKg, zone) {
 
 // POST /api/calculator/quote
 router.post('/quote', (req, res) => {
-  const { weight_kg, destination_type, postal_code, country, italian_postal_code } = req.body;
+  const { weight_kg, destination_type, postal_code, country, italian_postal_code, destination_cp } = req.body;
 
   if (!weight_kg || isNaN(parseFloat(weight_kg)) || parseFloat(weight_kg) <= 0) {
     return res.status(400).json({ error: 'Peso inválido' });
@@ -347,6 +379,24 @@ router.post('/quote', (req, res) => {
     normalize(country || '') === 'ITALIA' &&
     italian_postal_code
   ) ? cpToZoneItaly(italian_postal_code) : null;
+
+  // Pre-resolve special destinations for France / Germany / Netherlands (optional CP)
+  let specialDestResult = null;
+  if (destination_type === 'internacional' && destination_cp) {
+    const normC = normalize(country || '');
+    if (normC === 'FRANCIA' || normC === 'MONACO' || normC === 'MONACO') {
+      const r = cpToZoneFrance(destination_cp);
+      if (r.special) specialDestResult = r;
+    } else if (normC === 'ALEMANIA') {
+      const r = cpToZoneGermany(destination_cp);
+      if (r.special) specialDestResult = r;
+    } else if (normC === 'HOLANDA' || normC === 'PAISES BAJOS' || normC === 'BELGICA, HOLANDA Y LUXEMBURGO') {
+      const cpNum = parseInt(String(destination_cp).replace(/\D/g, ''), 10);
+      if (cpNum >= 6200 && cpNum <= 6499) {
+        specialDestResult = { special: true, price: 16.02, label: 'Islas de Holanda (6200–6499)' };
+      }
+    }
+  }
 
   const results = [];
   const notCovered = [];
@@ -437,6 +487,31 @@ router.post('/quote', (req, res) => {
         });
       } else {
         notCovered.push({ agency: agency.display_name, reason: 'Destino especial Italia: no cubierto por esta agencia' });
+      }
+      continue;
+    }
+
+    // France/Germany/Netherlands special territory: per-kg or fixed price, only Redur
+    if (specialDestResult?.special) {
+      if (normalize(agency.name) === 'REDUR') {
+        let price;
+        if (specialDestResult.price !== undefined) {
+          price = specialDestResult.price; // fixed
+        } else {
+          price = Math.round(Math.max(weightKg * specialDestResult.rate_per_kg, specialDestResult.min_price) * 100) / 100;
+        }
+        results.push({
+          agency_name: agency.display_name,
+          zone: specialDestResult.label,
+          weight_billed_kg: weightKg,
+          price,
+          scope: destination_type,
+          notes: specialDestResult.rate_per_kg
+            ? `${specialDestResult.rate_per_kg} €/kg · mín. ${specialDestResult.min_price} €`
+            : 'Precio fijo — destino especial',
+        });
+      } else {
+        notCovered.push({ agency: agency.display_name, reason: 'Destino especial: no cubierto por esta agencia' });
       }
       continue;
     }

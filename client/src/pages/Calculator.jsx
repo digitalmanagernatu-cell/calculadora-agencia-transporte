@@ -7,7 +7,11 @@ const INITIAL_FORM = {
   postal_code: '',
   country: '',
   italian_postal_code: '',
+  destination_cp: '',
 };
+
+// Countries where an optional destination CP enables special island/zone detection
+const OPTIONAL_CP_COUNTRIES = new Set(['Francia', 'Alemania', 'Holanda', 'Países Bajos']);
 
 // Normalize accents for deduplication comparison
 function normalizeAccents(s) {
@@ -83,6 +87,9 @@ export default function Calculator() {
         if (form.country === 'Italia' && form.italian_postal_code) {
           body.italian_postal_code = form.italian_postal_code;
         }
+        if (OPTIONAL_CP_COUNTRIES.has(form.country) && form.destination_cp) {
+          body.destination_cp = form.destination_cp;
+        }
       }
 
       const res = await fetch('/api/calculator/quote', {
@@ -106,7 +113,8 @@ export default function Calculator() {
       const updated = { ...prev, [field]: value };
       // Clear Italian CP when country changes away from Italia or scope changes
       if (field === 'country' && value !== 'Italia') updated.italian_postal_code = '';
-      if (field === 'destination_type') updated.italian_postal_code = '';
+      if (field === 'country') updated.destination_cp = '';
+      if (field === 'destination_type') { updated.italian_postal_code = ''; updated.destination_cp = ''; }
       return updated;
     });
     if (validationErrors[field]) {
@@ -215,6 +223,32 @@ export default function Calculator() {
               </select>
               {validationErrors.country && (
                 <p className="mt-1 text-xs text-red-600">{validationErrors.country}</p>
+              )}
+
+              {/* Optional CP for countries with special island destinations */}
+              {OPTIONAL_CP_COUNTRIES.has(form.country) && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Código postal de destino <span className="text-gray-400 font-normal">(opcional — para islas)</span>
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    value={form.destination_cp}
+                    onChange={e => handleChange('destination_cp', e.target.value.replace(/\D/g, ''))}
+                    placeholder={
+                      form.country === 'Francia' ? 'Ej: 20200 (Córcega), 17000 (Île de Ré)…' :
+                      form.country === 'Alemania' ? 'Ej: 25980 (Sylt), 27498 (Helgoland)…' :
+                      'Ej: 6200–6499 (Islas de Holanda)'
+                    }
+                    className="w-full sm:w-64 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy focus:border-transparent"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    {form.country === 'Francia' && 'Deja vacío para tarifa peninsular estándar. Islas: CP 17xxx, 20xxx, 22xxx, 29xxx, 50xxx, 56xxx, 83xxx, 85xxx.'}
+                    {form.country === 'Alemania' && 'Deja vacío para tarifa estándar. Islas del Mar del Norte (Sylt, Borkum, Helgoland, etc.) tienen tarifa diferencial.'}
+                    {(form.country === 'Holanda' || form.country === 'Países Bajos') && 'Deja vacío para tarifa estándar. CPs 6200–6499 tienen tarifa especial.'}
+                  </p>
+                </div>
               )}
 
               {/* Italian postal code — shown only when Italia is selected */}
