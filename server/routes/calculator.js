@@ -154,6 +154,44 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
   return null;
 }
 
+// Like resolveZone but returns ALL matching zones (handles multi-zone countries like "Italia Zona 1"/"Italia Zona 2")
+function resolveAllZones(agencyId, agencyName, scope, postalCode, country) {
+  if (scope !== 'internacional') {
+    const z = resolveZone(agencyId, agencyName, scope, postalCode, country);
+    return z ? [z] : [];
+  }
+  if (!country) return [];
+  if (normalize(agencyName) === 'NACEX') return [];
+
+  const normalizedCountry = normalize(country);
+  const mappings = db.prepare(
+    'SELECT zone, destination FROM zone_mappings WHERE agency_id = ? AND scope = ?'
+  ).all(agencyId, 'internacional');
+
+  const zones = [];
+
+  for (const m of mappings) {
+    const normDest = normalize(m.destination);
+    // Strip trailing " ZONA N" or " ZONA N.N" for comparison
+    const normDestBase = normDest.replace(/\s+ZONA\s+\d+([.,]\d+)?$/, '').trim();
+    if (normDest === normalizedCountry || normDestBase === normalizedCountry) {
+      if (!zones.includes(m.zone)) zones.push(m.zone);
+    }
+  }
+
+  // Fuzzy fallback: prefix/contains (catches cases where stored name is a substring)
+  if (zones.length === 0) {
+    for (const m of mappings) {
+      const normDest = normalize(m.destination);
+      if (normDest.includes(normalizedCountry) || normalizedCountry.includes(normDest)) {
+        if (!zones.includes(m.zone)) zones.push(m.zone);
+      }
+    }
+  }
+
+  return zones;
+}
+
 // Calculate price for given weight and ordered tiers
 function calculatePrice(weightKg, tiers) {
   if (!tiers || tiers.length === 0) return null;
@@ -357,37 +395,38 @@ router.post('/quote', (req, res) => {
       continue;
     }
 
-    // Resolve zone
-    const zone = resolveZone(agency.id, agency.name, destination_type, postal_code, country);
-    if (!zone) {
+    // Resolve zone(s) — may return multiple for multi-zone countries (e.g. Italia Zona 1 + Zona 2)
+    const zones = resolveAllZones(agency.id, agency.name, destination_type, postal_code, country);
+    if (!zones.length) {
       notCovered.push({ agency: agency.display_name, reason: 'Zona no encontrada para este destino' });
       continue;
     }
 
-    // Get ordered weight tiers
-    const tiers = db.prepare(
-      'SELECT * FROM tariff_rates WHERE agency_id = ? AND scope = ? AND zone = ? ORDER BY weight_max_kg ASC'
-    ).all(agency.id, destination_type, zone);
+    let addedForAgency = false;
+    for (const zone of zones) {
+      const tiers = db.prepare(
+        'SELECT * FROM tariff_rates WHERE agency_id = ? AND scope = ? AND zone = ? ORDER BY weight_max_kg ASC'
+      ).all(agency.id, destination_type, zone);
 
-    if (!tiers.length) {
+      if (!tiers.length) continue;
+
+      const price = calculatePrice(weightKg, tiers);
+      if (price === null) continue;
+
+      results.push({
+        agency_name: agency.display_name,
+        zone,
+        weight_billed_kg: weightKg,
+        price,
+        scope: destination_type,
+        notes: '',
+      });
+      addedForAgency = true;
+    }
+
+    if (!addedForAgency) {
       notCovered.push({ agency: agency.display_name, reason: 'Sin datos de tarifa para la zona' });
-      continue;
     }
-
-    const price = calculatePrice(weightKg, tiers);
-    if (price === null) {
-      notCovered.push({ agency: agency.display_name, reason: 'Peso supera el máximo disponible sin tarifa por kg adicional' });
-      continue;
-    }
-
-    results.push({
-      agency_name: agency.display_name,
-      zone,
-      weight_billed_kg: weightKg,
-      price,
-      scope: destination_type,
-      notes: '',
-    });
   }
 
   results.sort((a, b) => a.price - b.price);
@@ -420,7 +459,20 @@ router.get('/countries', (req, res) => {
   const rows = db.prepare(
     "SELECT DISTINCT destination FROM zone_mappings WHERE scope = 'internacional' ORDER BY destination ASC"
   ).all();
-  res.json(rows.map(r => r.destination));
+
+  // Strip trailing " Zona N" suffixes and deduplicate so multi-zone countries (e.g. "Italia Zona 1",
+  // "Italia Zona 2") appear as a single entry ("Italia") in the picker.
+  const seen = new Set();
+  const countries = [];
+  for (const r of rows) {
+    const name = r.destination.replace(/\s+Zona\s+\d+([.,]\d+)?\s*$/i, '').trim();
+    if (!seen.has(name)) {
+      seen.add(name);
+      countries.push(name);
+    }
+  }
+  countries.sort((a, b) => a.localeCompare(b, 'es'));
+  res.json(countries);
 });
 
 module.exports = router;
