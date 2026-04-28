@@ -154,6 +154,42 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
   return null;
 }
 
+// Map Italian CP (5-digit) to Redur zone or special fixed-price destination
+// Returns: { zone: 'Italia Zona 1' | 'Italia Zona 2' }
+//       or { special: true, price: number, label: string }
+function cpToZoneItaly(cp) {
+  const cpStr = String(cp).replace(/\D/g, '').padStart(5, '0');
+  const cpNum = parseInt(cpStr, 10);
+  const prefix = parseInt(cpStr.substring(0, 2), 10);
+
+  // Special customs territories — fixed price regardless of weight
+  if (cpNum === 22060) return { special: true, price: 94.46, label: 'Campione d\'Italia (22060)' };
+  if (cpNum === 23030) return { special: true, price: 49.38, label: 'Livigno (23030)' };
+
+  // Italian minor islands NOT already in Zona 2 — fixed price
+  // Elba + Capraia (Livorno province, island CPs 57031–57039)
+  if (cpNum >= 57031 && cpNum <= 57039) return { special: true, price: 21.36, label: 'Islas Menores — Elba/Archipiélago Toscano' };
+  // Isola del Giglio (Grosseto province)
+  if (cpNum === 58012) return { special: true, price: 21.36, label: 'Islas Menores — Isola del Giglio' };
+  // Pontine Islands: Ponza (04027), Ventotene (04028)
+  if (cpNum === 4027 || cpNum === 4028) return { special: true, price: 21.36, label: 'Islas Menores — Islas Pontinas' };
+
+  // Zona 2: Sardinia (07–09), southern Italy (70–89), Sicily (90–98)
+  const ZONA2 = new Set([
+    7, 8, 9,                              // Sardinia: 07xxx, 08xxx, 09xxx
+    70, 71, 72, 73, 74, 75, 76,           // Puglia + part of Basilicata
+    80, 81, 82, 83, 84,                   // Campania
+    85,                                   // Potenza / Basilicata
+    86,                                   // Campobasso / Molise
+    87, 88, 89,                           // Calabria
+    90, 91, 92, 93, 94, 95, 96, 97, 98,  // Sicily
+  ]);
+  if (ZONA2.has(prefix)) return { zone: 'Italia Zona 2' };
+
+  // Zona 1: north + centre (00–06 Lazio/Umbria; 10–67 north, Toscana, Marche, Abruzzo)
+  return { zone: 'Italia Zona 1' };
+}
+
 // Like resolveZone but returns ALL matching zones (handles multi-zone countries like "Italia Zona 1"/"Italia Zona 2")
 function resolveAllZones(agencyId, agencyName, scope, postalCode, country) {
   if (scope !== 'internacional') {
@@ -287,7 +323,7 @@ function calcPalemania(weightKg, zone) {
 
 // POST /api/calculator/quote
 router.post('/quote', (req, res) => {
-  const { weight_kg, destination_type, postal_code, country } = req.body;
+  const { weight_kg, destination_type, postal_code, country, italian_postal_code } = req.body;
 
   if (!weight_kg || isNaN(parseFloat(weight_kg)) || parseFloat(weight_kg) <= 0) {
     return res.status(400).json({ error: 'Peso inválido' });
@@ -304,6 +340,13 @@ router.post('/quote', (req, res) => {
 
   const weightKg = parseFloat(weight_kg);
   const agencies = db.prepare('SELECT * FROM agencies WHERE active = 1').all();
+
+  // Pre-resolve Italian CP → zone or special fixed price (null if not applicable)
+  const italyZoneResult = (
+    destination_type === 'internacional' &&
+    normalize(country || '') === 'ITALIA' &&
+    italian_postal_code
+  ) ? cpToZoneItaly(italian_postal_code) : null;
 
   const results = [];
   const notCovered = [];
@@ -381,6 +424,23 @@ router.post('/quote', (req, res) => {
       continue;
     }
 
+    // Italy special territory (Campione, Livigno, Islas Menores): fixed price, no tariff lookup
+    if (italyZoneResult?.special) {
+      if (normalize(agency.name) === 'REDUR') {
+        results.push({
+          agency_name: agency.display_name,
+          zone: italyZoneResult.label,
+          weight_billed_kg: weightKg,
+          price: italyZoneResult.price,
+          scope: destination_type,
+          notes: 'Precio fijo — destino especial Italia',
+        });
+      } else {
+        notCovered.push({ agency: agency.display_name, reason: 'Destino especial Italia: no cubierto por esta agencia' });
+      }
+      continue;
+    }
+
     // Check if agency has tariffs for this scope
     const hasTariff = db.prepare(
       'SELECT COUNT(*) as c FROM tariff_rates WHERE agency_id = ? AND scope = ?'
@@ -395,8 +455,10 @@ router.post('/quote', (req, res) => {
       continue;
     }
 
-    // Resolve zone(s) — may return multiple for multi-zone countries (e.g. Italia Zona 1 + Zona 2)
-    const zones = resolveAllZones(agency.id, agency.name, destination_type, postal_code, country);
+    // Resolve zone — use CP-resolved Italian zone if available, else multi-zone resolution
+    const zones = italyZoneResult?.zone
+      ? [italyZoneResult.zone]
+      : resolveAllZones(agency.id, agency.name, destination_type, postal_code, country);
     if (!zones.length) {
       notCovered.push({ agency: agency.display_name, reason: 'Zona no encontrada para este destino' });
       continue;
@@ -443,7 +505,11 @@ router.post('/quote', (req, res) => {
       destinationResolved = `${province} (${prefix}xxx)`;
     }
   } else if (destination_type === 'internacional' && country) {
-    destinationResolved = country;
+    if (normalize(country) === 'ITALIA' && italian_postal_code) {
+      destinationResolved = `Italia (CP ${italian_postal_code})`;
+    } else {
+      destinationResolved = country;
+    }
   }
 
   res.json({
