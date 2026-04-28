@@ -6,6 +6,7 @@ const INITIAL_FORM = {
   destination_type: 'nacional',
   postal_code: '',
   country: '',
+  italian_postal_code: '',
 };
 
 // Normalize accents for deduplication comparison
@@ -51,6 +52,10 @@ export default function Calculator() {
     } else {
       if (!form.country) {
         errors.country = 'Selecciona un país de destino';
+      } else if (form.country === 'Italia') {
+        if (!form.italian_postal_code || !/^\d{5}$/.test(form.italian_postal_code)) {
+          errors.italian_postal_code = 'Introduce el código postal italiano (5 dígitos, ej: 20100)';
+        }
       }
     }
     return errors;
@@ -75,6 +80,9 @@ export default function Calculator() {
         body.postal_code = form.postal_code;
       } else {
         body.country = form.country;
+        if (form.country === 'Italia' && form.italian_postal_code) {
+          body.italian_postal_code = form.italian_postal_code;
+        }
       }
 
       const res = await fetch('/api/calculator/quote', {
@@ -94,7 +102,13 @@ export default function Calculator() {
   }
 
   function handleChange(field, value) {
-    setForm(prev => ({ ...prev, [field]: value }));
+    setForm(prev => {
+      const updated = { ...prev, [field]: value };
+      // Clear Italian CP when country changes away from Italia or scope changes
+      if (field === 'country' && value !== 'Italia') updated.italian_postal_code = '';
+      if (field === 'destination_type') updated.italian_postal_code = '';
+      return updated;
+    });
     if (validationErrors[field]) {
       setValidationErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
     }
@@ -202,6 +216,29 @@ export default function Calculator() {
               {validationErrors.country && (
                 <p className="mt-1 text-xs text-red-600">{validationErrors.country}</p>
               )}
+
+              {/* Italian postal code — shown only when Italia is selected */}
+              {form.country === 'Italia' && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Código postal italiano
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    value={form.italian_postal_code}
+                    onChange={e => handleChange('italian_postal_code', e.target.value.replace(/\D/g, ''))}
+                    placeholder="Ej: 20100 (Milano), 00100 (Roma)…"
+                    className={`w-full sm:w-56 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy focus:border-transparent ${
+                      validationErrors.italian_postal_code ? 'border-red-400' : 'border-gray-300'
+                    }`}
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Necesario para determinar si es Zona 1 (norte/centro) o Zona 2 (sur + islas)</p>
+                  {validationErrors.italian_postal_code && (
+                    <p className="mt-1 text-xs text-red-600">{validationErrors.italian_postal_code}</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -245,7 +282,7 @@ export default function Calculator() {
           ) : (
             <div className="space-y-3">
               {results.results.map((r, i) => (
-                <AgencyResult key={r.agency_name} {...r} isBest={i === 0} />
+                <AgencyResult key={`${r.agency_name}-${r.zone}`} {...r} isBest={i === 0} />
               ))}
             </div>
           )}
