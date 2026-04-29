@@ -589,7 +589,7 @@ router.post('/quote', (req, res) => {
     if (!addedForAgency) {
       notCovered.push({ agency: agency.display_name, reason: 'Sin datos de tarifa para la zona' });
     }
-
+  } // end for agency
 
   results.sort((a, b) => a.price - b.price);
 
