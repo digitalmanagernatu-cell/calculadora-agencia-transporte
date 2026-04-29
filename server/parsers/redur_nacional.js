@@ -126,9 +126,24 @@ function parse(filePath) {
   const ratesByZone = {};
   zoneCols.forEach(({ zone }) => { ratesByZone[zone] = []; });
 
+  let passedExtraRow = false;
+
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row) continue;
+
+    // Blank row: if we already found the end-of-table marker, stop here
+    const isBlankRow = !row || row.every(c => c === null || c === undefined || String(c ?? '').trim() === '');
+    if (isBlankRow) {
+      if (passedExtraRow) break;
+      continue;
+    }
+
+    // Another zone-header row means a new section has started — stop
+    let zoneHits = 0;
+    for (const cell of row) {
+      if (matchZoneName(cell)) zoneHits++;
+    }
+    if (zoneHits >= 3) break;
 
     const rawWeight = row[weightCol];
     if (rawWeight === null || rawWeight === undefined) continue;
@@ -146,6 +161,7 @@ function parse(filePath) {
         const price = parseFloat(row[col]);
         if (!isNaN(price) && price > 0) extraPerKg[zone] = price;
       }
+      passedExtraRow = true;
       continue;
     }
 

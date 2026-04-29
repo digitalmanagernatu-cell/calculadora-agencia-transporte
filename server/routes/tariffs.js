@@ -75,6 +75,40 @@ router.get('/', (req, res) => {
   res.json({ rates, zoneMappings, lastUpdated: lastFile?.uploaded_at || null });
 });
 
+// GET /api/tariffs/parse-debug?agency_id=&scope= — re-runs parser on last uploaded file and returns raw result
+router.get('/parse-debug', (req, res) => {
+  const { agency_id, scope } = req.query;
+  if (!agency_id || !scope) return res.status(400).json({ error: 'Se requieren agency_id y scope' });
+
+  const agency = db.prepare('SELECT * FROM agencies WHERE id = ?').get(agency_id);
+  if (!agency) return res.status(404).json({ error: 'Agencia no encontrada' });
+
+  const lastFile = db.prepare(
+    "SELECT filename FROM tariff_files WHERE agency_id = ? AND (scope = ? OR scope = 'ambas') ORDER BY uploaded_at DESC LIMIT 1"
+  ).get(agency_id, scope);
+  if (!lastFile) return res.status(404).json({ error: 'No hay archivo subido para esta agencia/scope' });
+
+  const filePath = path.join(uploadsDir, lastFile.filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Archivo no encontrado en disco: ' + lastFile.filename });
+
+  try {
+    const parser = getParser(agency.name, scope);
+    const parsed = parser.parse(filePath);
+    const summary = {
+      filename: lastFile.filename,
+      totalRates: parsed.rates.length,
+      totalZoneMappings: parsed.zoneMappings?.length,
+      warning: parsed.warning || null,
+      firstRates: parsed.rates.slice(0, 30),
+      zones: [...new Set(parsed.rates.map(r => r.zone))],
+      weightBreaks: [...new Set(parsed.rates.map(r => r.weight_max_kg))].sort((a, b) => a - b),
+    };
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/tariffs/export?agency_id=&scope=
 router.get('/export', (req, res) => {
   const { agency_id, scope } = req.query;
