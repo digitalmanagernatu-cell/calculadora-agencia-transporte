@@ -44,6 +44,8 @@ export default function Calculator() {
       .catch(() => {});
   }, []);
 
+  const isItaly = form.destination_type === 'internacional' && form.country === 'Italia';
+
   function validate() {
     const errors = {};
     if (!form.weight_kg || isNaN(parseFloat(form.weight_kg)) || parseFloat(form.weight_kg) < 0.1) {
@@ -60,6 +62,9 @@ export default function Calculator() {
         if (!form.italian_postal_code || !/^\d{5}$/.test(form.italian_postal_code)) {
           errors.italian_postal_code = 'Introduce el código postal italiano (5 dígitos, ej: 20100)';
         }
+      }
+      if (isItaly && (!form.italian_cap || !/^\d{5}$/.test(form.italian_cap))) {
+        errors.italian_cap = 'El CAP italiano debe tener 5 dígitos (ej: 20100)';
       }
     }
     return errors;
@@ -111,7 +116,6 @@ export default function Calculator() {
   function handleChange(field, value) {
     setForm(prev => {
       const updated = { ...prev, [field]: value };
-      // Clear Italian CP when country changes away from Italia or scope changes
       if (field === 'country' && value !== 'Italia') updated.italian_postal_code = '';
       if (field === 'country') updated.destination_cp = '';
       if (field === 'destination_type') { updated.italian_postal_code = ''; updated.destination_cp = ''; }
@@ -207,22 +211,44 @@ export default function Calculator() {
               )}
             </div>
           ) : (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">País de destino</label>
-              <select
-                value={form.country}
-                onChange={e => handleChange('country', e.target.value)}
-                className={`w-full sm:w-72 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy focus:border-transparent bg-white ${
-                  validationErrors.country ? 'border-red-400' : 'border-gray-300'
-                }`}
-              >
-                <option value="">— Selecciona un destino —</option>
-                {countriesList.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              {validationErrors.country && (
-                <p className="mt-1 text-xs text-red-600">{validationErrors.country}</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">País de destino</label>
+                <select
+                  value={form.country}
+                  onChange={e => handleChange('country', e.target.value)}
+                  className={`w-full sm:w-72 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy focus:border-transparent bg-white ${
+                    validationErrors.country ? 'border-red-400' : 'border-gray-300'
+                  }`}
+                >
+                  <option value="">— Selecciona un destino —</option>
+                  {countriesList.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                {validationErrors.country && (
+                  <p className="mt-1 text-xs text-red-600">{validationErrors.country}</p>
+                )}
+              </div>
+
+              {isItaly && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Código postal italiano (CAP)</label>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    value={form.italian_cap}
+                    onChange={e => handleChange('italian_cap', e.target.value.replace(/\D/g, ''))}
+                    placeholder="Ej: 20100 (Milán) o 00100 (Roma)"
+                    className={`w-full sm:w-56 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy focus:border-transparent ${
+                      validationErrors.italian_cap ? 'border-red-400' : 'border-gray-300'
+                    }`}
+                  />
+                  <p className="mt-1 text-xs text-gray-400">El CAP determina la zona (norte/centro-norte o sur/islas)</p>
+                  {validationErrors.italian_cap && (
+                    <p className="mt-1 text-xs text-red-600">{validationErrors.italian_cap}</p>
+                  )}
+                </div>
               )}
 
               {/* Optional CP for countries with special island destinations */}

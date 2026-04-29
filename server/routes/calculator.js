@@ -129,10 +129,32 @@ function resolveZone(agencyId, agencyName, scope, postalCode, country) {
     // Nacex has no international tariff
     if (normalize(agencyName) === 'NACEX') return null;
 
-    // Match country against zone_mappings destinations
+    // Italy: resolve zone by CAP prefix (stored as IT##)
+    if (normalize(country) === 'ITALIA') {
+      if (!postalCode) return null;
+      const capStr = String(postalCode).replace(/\D/g, '');
+      const capPrefix = 'IT' + capStr.substring(0, 2).padStart(2, '0');
+      const itMapping = db.prepare(
+        'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination = ?'
+      ).get(agencyId, 'internacional', capPrefix);
+      if (itMapping) return itMapping.zone;
+      // Fallback for old DB data before re-upload: determine zone from CAP prefix numerically
+      const capNum = parseInt(capStr.substring(0, 2), 10);
+      if (!isNaN(capNum)) {
+        const isZona1 = capNum >= 10 && capNum <= 59;
+        const targetZone = isZona1 ? 'Italia Zona 1' : 'Italia Zona 2';
+        const oldMapping = db.prepare(
+          'SELECT zone FROM zone_mappings WHERE agency_id = ? AND scope = ? AND zone = ? LIMIT 1'
+        ).get(agencyId, 'internacional', targetZone);
+        return oldMapping?.zone || null;
+      }
+      return null;
+    }
+
+    // Match country against zone_mappings destinations (skip IT## entries)
     const normalizedCountry = normalize(country);
     const mappings = db.prepare(
-      'SELECT zone, destination FROM zone_mappings WHERE agency_id = ? AND scope = ?'
+      "SELECT zone, destination FROM zone_mappings WHERE agency_id = ? AND scope = ? AND destination NOT LIKE 'IT%'"
     ).all(agencyId, 'internacional');
 
     for (const m of mappings) {
@@ -369,6 +391,9 @@ router.post('/quote', (req, res) => {
   if (destination_type === 'internacional' && !country) {
     return res.status(400).json({ error: 'Se requiere país para envíos internacionales' });
   }
+  if (destination_type === 'internacional' && country && normalize(country) === 'ITALIA' && !postal_code) {
+    return res.status(400).json({ error: 'Se requiere código postal (CAP) para envíos a Italia' });
+  }
 
   const weightKg = parseFloat(weight_kg);
   const agencies = db.prepare('SELECT * FROM agencies WHERE active = 1').all();
@@ -564,7 +589,7 @@ router.post('/quote', (req, res) => {
     if (!addedForAgency) {
       notCovered.push({ agency: agency.display_name, reason: 'Sin datos de tarifa para la zona' });
     }
-  }
+
 
   results.sort((a, b) => a.price - b.price);
 
@@ -606,6 +631,7 @@ router.get('/countries', (req, res) => {
   const seen = new Set();
   const countries = [];
   for (const r of rows) {
+    if (/^IT\d{2}$/.test(r.destination)) continue; // skip IT## cap prefix entries
     const name = r.destination.replace(/\s+Zona\s+\d+([.,]\d+)?\s*$/i, '').trim();
     if (!seen.has(name)) {
       seen.add(name);

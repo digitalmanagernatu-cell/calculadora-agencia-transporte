@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - claude/shipping-calculator-app-7DIQB
+      - claude/resume-previous-work-QlOtZ
 
 jobs:
   deploy:

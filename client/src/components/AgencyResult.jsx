@@ -19,7 +19,9 @@ export default function AgencyResult({ agency_name, zone, price, scope, notes, z
             <span className="font-medium text-gray-600">Zona:</span> {zone}
           </div>
           {notes && (
-            <div className="mt-1 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 font-medium">{notes}</div>
+            <div className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
+              {notes}
+            </div>
           )}
           {zone_note && (
             <div className="mt-1 text-xs text-yellow-800 bg-yellow-50 border border-yellow-200 rounded px-2 py-1">{zone_note}</div>
