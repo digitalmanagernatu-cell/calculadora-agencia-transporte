@@ -391,7 +391,7 @@ router.post('/quote', (req, res) => {
   if (destination_type === 'internacional' && !country) {
     return res.status(400).json({ error: 'Se requiere país para envíos internacionales' });
   }
-  if (destination_type === 'internacional' && country && normalize(country) === 'ITALIA' && !postal_code) {
+  if (destination_type === 'internacional' && country && normalize(country) === 'ITALIA' && !italian_postal_code) {
     return res.status(400).json({ error: 'Se requiere código postal (CAP) para envíos a Italia' });
   }
 
