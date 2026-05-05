@@ -95,16 +95,33 @@ router.get('/parse-debug', (req, res) => {
   try {
     const parser = getParser(agency.name, scope);
     const parsed = parser.parse(filePath);
-    const summary = {
+
+    // Group rates by service_name (for multi-service agencies like Correos Express)
+    const byService = {};
+    for (const r of parsed.rates) {
+      const key = r.service_name || '(sin servicio)';
+      if (!byService[key]) byService[key] = [];
+      byService[key].push(r);
+    }
+    const servicesSummary = {};
+    for (const [svc, rates] of Object.entries(byService)) {
+      const ratesForScope = rates.filter(r => !scope || scope === 'ambas' || r.scope === scope);
+      servicesSummary[svc] = {
+        count: ratesForScope.length,
+        zones: [...new Set(ratesForScope.map(r => r.zone))],
+        weightBreaks: [...new Set(ratesForScope.map(r => r.weight_max_kg))].sort((a, b) => a - b),
+        sampleRates: ratesForScope.slice(0, 10),
+      };
+    }
+
+    res.json({
       filename: lastFile.filename,
       totalRates: parsed.rates.length,
-      totalZoneMappings: parsed.zoneMappings?.length,
       warning: parsed.warning || null,
-      firstRates: parsed.rates.slice(0, 30),
-      zones: [...new Set(parsed.rates.map(r => r.zone))],
-      weightBreaks: [...new Set(parsed.rates.map(r => r.weight_max_kg))].sort((a, b) => a - b),
-    };
-    res.json(summary);
+      byService: servicesSummary,
+      allZones: [...new Set(parsed.rates.map(r => r.zone))],
+      allWeightBreaks: [...new Set(parsed.rates.map(r => r.weight_max_kg))].sort((a, b) => a - b),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
