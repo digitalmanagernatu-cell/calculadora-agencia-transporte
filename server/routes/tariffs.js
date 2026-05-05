@@ -35,6 +35,7 @@ function getParser(agencyName, scope) {
   if (name === 'TRANSAHER') return require('../parsers/transaher');
   if (name === 'NACEX') return require('../parsers/nacex');
   if (name === 'PALEMANIA') return require('../parsers/palemania');
+  if (name === 'CORREOS EXPRESS') return require('../parsers/correos_express');
   return require('../parsers/generic');
 }
 
@@ -172,7 +173,7 @@ router.post('/upload', upload.single('file'), (req, res) => {
   try {
     if (!agencyId && new_agency_name) {
       const normalized = new_agency_name.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
-      const displayName = new_agency_name.trim().charAt(0).toUpperCase() + new_agency_name.trim().slice(1).toLowerCase();
+      const displayName = new_agency_name.trim();
       const result = db.prepare('INSERT INTO agencies (name, display_name) VALUES (?, ?)').run(normalized, displayName);
       agencyId = result.lastInsertRowid;
       agencyName = normalized;
@@ -251,7 +252,7 @@ router.post('/upload', upload.single('file'), (req, res) => {
           const filteredMappings = parsed.zoneMappings.filter(m => m.scope === currentScope);
 
           const insertRate = db.prepare(
-            'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg, service_name) VALUES (?, ?, ?, ?, ?, ?, ?)'
           );
           const insertMapping = db.prepare(
             'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
@@ -261,7 +262,7 @@ router.post('/upload', upload.single('file'), (req, res) => {
           );
 
           for (const r of filteredRates) {
-            insertRate.run(agencyId, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+            insertRate.run(agencyId, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null, r.service_name ?? null);
             totalRecords++;
           }
           for (const m of filteredMappings) {

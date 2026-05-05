@@ -338,6 +338,127 @@ function cpToZonePalemania(cp) {
   return zoneMap[prefix] || null;
 }
 
+// Correos Express: postal code → zone name
+function cpToZoneCorreosExpress(cp) {
+  const cpStr = String(cp).replace(/\D/g, '').padStart(5, '0');
+  const prefix = parseInt(cpStr.substring(0, 2), 10);
+  const cpNum = parseInt(cpStr, 10);
+
+  if (prefix === 30) return 'Provincial';
+  if ([2, 3, 4, 46].includes(prefix)) return 'Reg.';
+
+  // Islas Menores Baleares — before general Baleares check
+  if (cpNum === 7860 || (cpNum >= 7870 && cpNum <= 7872)) return 'Islas Menores Baleares';
+  if (prefix === 7) return 'Baleares Interislas';
+
+  // Canarias islas menores — before Tnf/Lpa check
+  if ((cpNum >= 35500 && cpNum <= 35660) || (cpNum >= 38700 && cpNum <= 38917)) return 'Is. Menores Canarias';
+  if ((cpNum >= 35001 && cpNum <= 35489) || (cpNum >= 38001 && cpNum <= 38690)) return 'Canarias - Tnf Y Lpa';
+
+  if (prefix === 51 || prefix === 52) return 'Ceuta y Melilla';
+
+  // Pen.+ (zonas remotas peninsulares)
+  if ([5, 6, 9, 10, 21, 22, 24, 25, 27, 32, 33, 34, 36, 37, 39, 42, 47, 49].includes(prefix)) return 'Pen. +';
+
+  return 'Pen.';
+}
+
+// Zones for Paq Empresa 14 that are NOT covered (only Pen./Pen.+/Reg./Provincial)
+const PAQ_EMPRESA_EXCLUDED_ZONES = new Set([
+  'Baleares Interislas', 'Islas Menores Baleares',
+  'Canarias - Tnf Y Lpa', 'Is. Menores Canarias',
+  'Ceuta y Melilla',
+]);
+
+// International zone maps — keys normalized (uppercase, no accents)
+const CORREOS_INTL_EXPRESS = {
+  // Europa 1
+  'FRANCIA': 'Europa 1', 'ALEMANIA': 'Europa 1', 'PORTUGAL': 'Europa 1',
+  'ITALIA': 'Europa 1', 'BELGICA': 'Europa 1', 'HOLANDA': 'Europa 1',
+  'PAISES BAJOS': 'Europa 1', 'AUSTRIA': 'Europa 1', 'LUXEMBURGO': 'Europa 1',
+  'MONACO': 'Europa 1',
+  // Europa 2
+  'REINO UNIDO': 'Europa 2', 'GRAN BRETANA': 'Europa 2', 'IRLANDA': 'Europa 2',
+  'SUIZA': 'Europa 2', 'POLONIA': 'Europa 2', 'REPUBLICA CHECA': 'Europa 2',
+  'HUNGRIA': 'Europa 2', 'DINAMARCA': 'Europa 2', 'SUECIA': 'Europa 2',
+  'FINLANDIA': 'Europa 2', 'NORUEGA': 'Europa 2', 'ESLOVAQUIA': 'Europa 2',
+  'ESLOVENIA': 'Europa 2', 'CROACIA': 'Europa 2', 'ESTONIA': 'Europa 2',
+  'LETONIA': 'Europa 2', 'LITUANIA': 'Europa 2', 'RUMANIA': 'Europa 2',
+  'BULGARIA': 'Europa 2', 'GRECIA': 'Europa 2', 'CHIPRE': 'Europa 2',
+  'MALTA': 'Europa 2',
+  // Europa 3
+  'RUSIA': 'Europa 3', 'UCRANIA': 'Europa 3', 'TURQUIA': 'Europa 3',
+  'SERBIA': 'Europa 3', 'ALBANIA': 'Europa 3', 'BOSNIA': 'Europa 3',
+  'MOLDAVIA': 'Europa 3', 'ISLANDIA': 'Europa 3', 'LIECHTENSTEIN': 'Europa 3',
+  'ANDORRA': 'Europa 3', 'BIELORRUSIA': 'Europa 3', 'MACEDONIA': 'Europa 3',
+  // Norteamérica
+  'EE.UU.': 'Norteamérica', 'ESTADOS UNIDOS': 'Norteamérica',
+  'CANADA': 'Norteamérica', 'MEXICO': 'Norteamérica',
+  // Sudamérica
+  'BRASIL': 'Sudamérica', 'ARGENTINA': 'Sudamérica', 'CHILE': 'Sudamérica',
+  'COLOMBIA': 'Sudamérica', 'PERU': 'Sudamérica', 'VENEZUELA': 'Sudamérica',
+  'ECUADOR': 'Sudamérica', 'URUGUAY': 'Sudamérica', 'BOLIVIA': 'Sudamérica',
+  'PARAGUAY': 'Sudamérica', 'PANAMA': 'Sudamérica', 'COSTA RICA': 'Sudamérica',
+  'CUBA': 'Sudamérica', 'PUERTO RICO': 'Sudamérica',
+  // Oriente 1
+  'JAPON': 'Oriente 1', 'CHINA': 'Oriente 1', 'HONG KONG': 'Oriente 1',
+  'TAIWAN': 'Oriente 1', 'COREA DEL SUR': 'Oriente 1',
+  'AUSTRALIA': 'Oriente 1', 'NUEVA ZELANDA': 'Oriente 1',
+  // Oriente 2
+  'INDIA': 'Oriente 2', 'PAKISTAN': 'Oriente 2', 'INDONESIA': 'Oriente 2',
+  'FILIPINAS': 'Oriente 2', 'TAILANDIA': 'Oriente 2', 'VIETNAM': 'Oriente 2',
+  'MALASIA': 'Oriente 2', 'SINGAPUR': 'Oriente 2', 'BANGLADESH': 'Oriente 2',
+  // África
+  'MARRUECOS': 'África', 'ARGELIA': 'África', 'TUNEZ': 'África',
+  'EGIPTO': 'África', 'SUDAFRICA': 'África', 'NIGERIA': 'África',
+  'GHANA': 'África', 'KENIA': 'África', 'SENEGAL': 'África',
+  'CAMERUN': 'África', 'ANGOLA': 'África', 'ETIOPIA': 'África',
+  'TANZANIA': 'África', 'MOZAMBIQUE': 'África',
+};
+
+const CORREOS_INTL_ESTANDAR = {
+  // Zona 1 (same geography as Express Europa 1)
+  'FRANCIA': 'Zona 1', 'ALEMANIA': 'Zona 1', 'PORTUGAL': 'Zona 1',
+  'ITALIA': 'Zona 1', 'BELGICA': 'Zona 1', 'HOLANDA': 'Zona 1',
+  'PAISES BAJOS': 'Zona 1', 'AUSTRIA': 'Zona 1', 'LUXEMBURGO': 'Zona 1',
+  'MONACO': 'Zona 1',
+  // Zona 2 (same as Europa 2)
+  'REINO UNIDO': 'Zona 2', 'GRAN BRETANA': 'Zona 2', 'IRLANDA': 'Zona 2',
+  'SUIZA': 'Zona 2', 'POLONIA': 'Zona 2', 'REPUBLICA CHECA': 'Zona 2',
+  'HUNGRIA': 'Zona 2', 'DINAMARCA': 'Zona 2', 'SUECIA': 'Zona 2',
+  'FINLANDIA': 'Zona 2', 'NORUEGA': 'Zona 2', 'ESLOVAQUIA': 'Zona 2',
+  'ESLOVENIA': 'Zona 2', 'CROACIA': 'Zona 2', 'ESTONIA': 'Zona 2',
+  'LETONIA': 'Zona 2', 'LITUANIA': 'Zona 2', 'RUMANIA': 'Zona 2',
+  'BULGARIA': 'Zona 2', 'GRECIA': 'Zona 2', 'CHIPRE': 'Zona 2',
+  'MALTA': 'Zona 2',
+  // Zona 3 (same as Europa 3)
+  'RUSIA': 'Zona 3', 'UCRANIA': 'Zona 3', 'TURQUIA': 'Zona 3',
+  'SERBIA': 'Zona 3', 'ALBANIA': 'Zona 3', 'BOSNIA': 'Zona 3',
+  'MOLDAVIA': 'Zona 3', 'ISLANDIA': 'Zona 3', 'LIECHTENSTEIN': 'Zona 3',
+  'ANDORRA': 'Zona 3', 'BIELORRUSIA': 'Zona 3', 'MACEDONIA': 'Zona 3',
+  // Zona 4 (Americas)
+  'EE.UU.': 'Zona 4', 'ESTADOS UNIDOS': 'Zona 4', 'CANADA': 'Zona 4',
+  'MEXICO': 'Zona 4', 'BRASIL': 'Zona 4', 'ARGENTINA': 'Zona 4',
+  'CHILE': 'Zona 4', 'COLOMBIA': 'Zona 4', 'PERU': 'Zona 4',
+  'VENEZUELA': 'Zona 4', 'ECUADOR': 'Zona 4', 'URUGUAY': 'Zona 4',
+  'BOLIVIA': 'Zona 4', 'PARAGUAY': 'Zona 4', 'PANAMA': 'Zona 4',
+  'COSTA RICA': 'Zona 4', 'CUBA': 'Zona 4', 'PUERTO RICO': 'Zona 4',
+  // Zona 5 (Asia Pacific)
+  'JAPON': 'Zona 5', 'CHINA': 'Zona 5', 'HONG KONG': 'Zona 5',
+  'TAIWAN': 'Zona 5', 'COREA DEL SUR': 'Zona 5',
+  'AUSTRALIA': 'Zona 5', 'NUEVA ZELANDA': 'Zona 5',
+  'INDIA': 'Zona 5', 'PAKISTAN': 'Zona 5', 'INDONESIA': 'Zona 5',
+  'FILIPINAS': 'Zona 5', 'TAILANDIA': 'Zona 5', 'VIETNAM': 'Zona 5',
+  'MALASIA': 'Zona 5', 'SINGAPUR': 'Zona 5', 'BANGLADESH': 'Zona 5',
+  'MARRUECOS': 'Zona 5', 'ARGELIA': 'Zona 5', 'TUNEZ': 'Zona 5',
+  'EGIPTO': 'Zona 5',
+  // Zona 6 (Rest of Africa, Middle East)
+  'SUDAFRICA': 'Zona 6', 'NIGERIA': 'Zona 6', 'GHANA': 'Zona 6',
+  'KENIA': 'Zona 6', 'SENEGAL': 'Zona 6', 'CAMERUN': 'Zona 6',
+  'ANGOLA': 'Zona 6', 'ETIOPIA': 'Zona 6', 'TANZANIA': 'Zona 6',
+  'MOZAMBIQUE': 'Zona 6',
+};
+
 // Find the cheapest palet combination that covers weight_kg for the given Palemanía zone.
 // Returns:
 //   { noRates: true }   — no rows exist in palemania_rates for this zone (file not loaded)
@@ -496,6 +617,97 @@ router.post('/quote', (req, res) => {
         notes: `${result.num_pales} palet${result.num_pales > 1 ? 's' : ''} ${result.palet_type} (máx. ${result.max_kg_per_palet} kg/pale)`,
         zone_note: zone === '7' ? '⚠️ Confirmar con Palemanía si aplica zona 7.1 (+18%)' : '',
       });
+      continue;
+    }
+
+    // Correos Express: multi-service agency, zone resolved in code (not via zone_mappings)
+    if (normalize(agency.name) === 'CORREOS EXPRESS') {
+      // Portuguese CPs: Correos Express nacional doesn't cover Portugal
+      if (destination_type === 'nacional') {
+        const cpStr = String(postal_code).replace(/\D/g, '');
+        if (cpStr.length === 4) {
+          notCovered.push({ agency: agency.display_name, reason: 'Correos Express: Portugal no incluido en nacional' });
+          continue;
+        }
+
+        const zone = cpToZoneCorreosExpress(cpStr);
+        const services = db.prepare(
+          "SELECT DISTINCT service_name FROM tariff_rates WHERE agency_id = ? AND scope = 'nacional' AND service_name IS NOT NULL"
+        ).all(agency.id);
+
+        if (!services.length) {
+          notCovered.push({ agency: agency.display_name, reason: 'Sin tarifas cargadas — subir Correos_2026.xlsx' });
+          continue;
+        }
+
+        let addedAny = false;
+        for (const { service_name } of services) {
+          if (service_name === 'Paq Empresa 14' && PAQ_EMPRESA_EXCLUDED_ZONES.has(zone)) continue;
+
+          const tiers = db.prepare(
+            'SELECT * FROM tariff_rates WHERE agency_id = ? AND scope = ? AND zone = ? AND service_name = ? ORDER BY weight_max_kg ASC'
+          ).all(agency.id, 'nacional', zone, service_name);
+          if (!tiers.length) continue;
+
+          const price = calculatePrice(weightKg, tiers);
+          if (price === null) continue;
+
+          results.push({
+            agency_name: `${agency.display_name} — ${service_name}`,
+            zone,
+            weight_billed_kg: weightKg,
+            price,
+            scope: destination_type,
+            notes: '',
+          });
+          addedAny = true;
+        }
+
+        if (!addedAny) {
+          notCovered.push({ agency: agency.display_name, reason: 'Destino no cubierto por Correos Express' });
+        }
+
+      } else {
+        // Internacional
+        const normCountry = normalize(country || '');
+        const services = db.prepare(
+          "SELECT DISTINCT service_name FROM tariff_rates WHERE agency_id = ? AND scope = 'internacional' AND service_name IS NOT NULL"
+        ).all(agency.id);
+
+        if (!services.length) {
+          notCovered.push({ agency: agency.display_name, reason: 'Sin tarifas internacionales cargadas' });
+          continue;
+        }
+
+        let addedAny = false;
+        for (const { service_name } of services) {
+          const zoneMap = service_name === 'Internacional Express' ? CORREOS_INTL_EXPRESS : CORREOS_INTL_ESTANDAR;
+          const zone = zoneMap[normCountry] || null;
+          if (!zone) continue;
+
+          const tiers = db.prepare(
+            'SELECT * FROM tariff_rates WHERE agency_id = ? AND scope = ? AND zone = ? AND service_name = ? ORDER BY weight_max_kg ASC'
+          ).all(agency.id, 'internacional', zone, service_name);
+          if (!tiers.length) continue;
+
+          const price = calculatePrice(weightKg, tiers);
+          if (price === null) continue;
+
+          results.push({
+            agency_name: `${agency.display_name} — ${service_name}`,
+            zone,
+            weight_billed_kg: weightKg,
+            price,
+            scope: destination_type,
+            notes: '',
+          });
+          addedAny = true;
+        }
+
+        if (!addedAny) {
+          notCovered.push({ agency: agency.display_name, reason: 'País no cubierto por Correos Express' });
+        }
+      }
       continue;
     }
 

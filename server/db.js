@@ -70,6 +70,11 @@ function initSchema() {
       value TEXT NOT NULL
     );
   `);
+
+  // Migration: add service_name column to tariff_rates if not already present
+  try {
+    db.exec('ALTER TABLE tariff_rates ADD COLUMN service_name TEXT DEFAULT NULL');
+  } catch (_) { /* column already exists */ }
 }
 
 module.exports = { db, initSchema };
