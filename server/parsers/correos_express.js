@@ -1,10 +1,18 @@
 const XLSX = require('xlsx');
 
 const SHEETS_CONFIG = [
-  { name: 'Paq 24',                 service: 'Paq 24',                 scope: 'nacional'      },
-  { name: 'Paq Empresa 14',          service: 'Paq Empresa 14',          scope: 'nacional'      },
-  { name: 'Internacional Express',   service: 'Internacional Express',   scope: 'internacional' },
-  { name: 'Internacional Estándar',  service: 'Internacional Estándar',  scope: 'internacional' },
+  // Servicios nacionales peninsulares
+  { name: 'Paq 24',           service: 'Paq 24',           scope: 'nacional' },
+  { name: 'Paq Empresa 14',   service: 'Paq Empresa 14',   scope: 'nacional' },
+  { name: 'Paq Ecommerce',    service: 'Paq Ecommerce',    scope: 'nacional' },
+  { name: 'Entrega Plus',     service: 'Entrega Plus',     scope: 'nacional' },
+  // Servicios nacionales de islas (zonas propias: Baleares, Canarias, Ceuta/Melilla)
+  { name: 'Islas Express',       service: 'Islas Express',       scope: 'nacional' },
+  { name: 'Islas Documentación', service: 'Islas Documentación', scope: 'nacional' },
+  { name: 'Islas Menores',       service: 'Islas Menores',       scope: 'nacional' },
+  // Servicios internacionales
+  { name: 'Internacional Express',  service: 'Internacional Express',  scope: 'internacional' },
+  { name: 'Internacional Estándar', service: 'Internacional Estándar', scope: 'internacional' },
 ];
 
 function normalizeText(val) {

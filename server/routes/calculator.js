@@ -370,6 +370,14 @@ const PAQ_EMPRESA_EXCLUDED_ZONES = new Set([
   'Ceuta y Melilla',
 ]);
 
+// Island-specific services: only shown when destination zone IS an island
+const ISLAS_SERVICES = new Set(['Islas Express', 'Islas Documentación', 'Islas Menores']);
+const ISLAS_ZONES = new Set([
+  'Baleares Interislas', 'Islas Menores Baleares',
+  'Canarias - Tnf Y Lpa', 'Is. Menores Canarias',
+  'Ceuta y Melilla',
+]);
+
 // International zone maps — keys normalized (uppercase, no accents)
 const CORREOS_INTL_EXPRESS = {
   // Europa 1
@@ -642,7 +650,10 @@ router.post('/quote', (req, res) => {
 
         let addedAny = false;
         for (const { service_name } of services) {
+          // Paq Empresa 14: no cubre islas
           if (service_name === 'Paq Empresa 14' && PAQ_EMPRESA_EXCLUDED_ZONES.has(zone)) continue;
+          // Servicios Islas: solo para destinos de islas, no para peninsular
+          if (ISLAS_SERVICES.has(service_name) && !ISLAS_ZONES.has(zone)) continue;
 
           const tiers = db.prepare(
             'SELECT * FROM tariff_rates WHERE agency_id = ? AND scope = ? AND zone = ? AND service_name = ? ORDER BY weight_max_kg ASC'
