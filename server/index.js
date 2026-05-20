@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_PATH)) {
 }
 
 // Increment this when parsers or zone mappings change — forces a full reseed
-const SEED_VERSION = 8;
+const SEED_VERSION = 9;
 
 // Initialize DB schema
 initSchema();
@@ -121,6 +121,38 @@ function seedCorreosExpressIfNeeded() {
   }
 }
 
+// Seed DHL on startup if rates are missing.
+function seedDHLIfNeeded() {
+  db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('DHL', 'DHL');
+  const agency = db.prepare("SELECT id FROM agencies WHERE name = 'DHL'").get();
+
+  const count = db.prepare('SELECT COUNT(*) as c FROM tariff_rates WHERE agency_id = ?').get(agency.id).c;
+  if (count > 0) return;
+
+  console.log('[seed] DHL: cargando tarifa...');
+  try {
+    const parsed = require('./parsers/dhl').parse();
+    const doInsert = db.transaction(() => {
+      db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(agency.id);
+      const insertRate = db.prepare(
+        'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      const insertMapping = db.prepare(
+        'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+      );
+      for (const r of parsed.rates) insertRate.run(agency.id, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+      for (const m of parsed.zoneMappings) insertMapping.run(agency.id, m.scope, m.zone, m.destination);
+      db.prepare('INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)').run(agency.id, 'nacional', 'dhl');
+    });
+    doInsert();
+    console.log(`[seed] DHL: ${parsed.rates.length} tarifas cargadas.`);
+  } catch (err) {
+    console.error('[seed] Error al cargar DHL:', err.message);
+  }
+}
+
 // Seed initial data when DB is empty OR seed version has changed
 async function seedInitialData() {
   const stored = db.prepare("SELECT value FROM meta WHERE key = 'seed_version'").get();
@@ -133,6 +165,8 @@ async function seedInitialData() {
   await seedPalemaniaIfNeeded();
   // CORREOS EXPRESS re-seed: runs independently whenever rates are empty
   seedCorreosExpressIfNeeded();
+  // DHL re-seed: runs independently whenever rates are empty
+  seedDHLIfNeeded();
 
   if (!needsFullSeed) return;
 
@@ -251,6 +285,30 @@ async function seedInitialData() {
     } catch (err) {
       console.error(`[seed] Error procesando ${seed.file}:`, err.message);
     }
+  }
+
+  // DHL: always re-seed on full seed (clear + insert)
+  try {
+    db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('DHL', 'DHL');
+    const dhlAgency = db.prepare("SELECT id FROM agencies WHERE name = 'DHL'").get();
+    const dhlParsed = require('./parsers/dhl').parse();
+    db.transaction(() => {
+      db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(dhlAgency.id);
+      db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(dhlAgency.id);
+      db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(dhlAgency.id);
+      const insertRate = db.prepare(
+        'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      const insertMapping = db.prepare(
+        'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+      );
+      for (const r of dhlParsed.rates) insertRate.run(dhlAgency.id, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+      for (const m of dhlParsed.zoneMappings) insertMapping.run(dhlAgency.id, m.scope, m.zone, m.destination);
+      db.prepare('INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)').run(dhlAgency.id, 'nacional', 'dhl');
+    })();
+    console.log('[seed] OK: DHL (hardcoded, nacional)');
+  } catch (err) {
+    console.error('[seed] Error al cargar DHL:', err.message);
   }
 
   // Correos Express: always re-seed on full seed (clear + insert)
