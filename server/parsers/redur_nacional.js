@@ -1,11 +1,11 @@
 const XLSX = require('xlsx');
 
 // Sheet: NATUAROMA 2026
-// Price table header: Excel row 115 = idx 114; data rows Excel 115-143 = idx 114-142
-// Zone columns (0-based): B=1(weight), C=2(ZonaP), D=3(Z1), E=4(Z2), F=5(Z3), G=6(Z4), H=7(Z5), I=8(Z6), J=9(B2), K=10(PT3), L=11(PT4), N=13(R1), O=14(AEREO), P=15(MAR)
+// Layout (col indices 0-based, col A=0 is empty):
+//   B(1)=KILOS  C(2)=ZonaP  D(3)=Z1  E(4)=Z2  F(5)=Z3  G(6)=Z4  H(7)=Z5  I(8)=Z6
+//   J(9)=B2  K(10)=PT3  L(11)=PT4  [M(12)=2nd KILOS]  N(13)=R1  O(14)=AEREO  P(15)=MAR
+// Header row detected dynamically (looks for "KILOS" in WEIGHT_COL)
 
-const PRICE_HEADER_IDX = 114; // Excel row 115
-const PRICE_DATA_END_IDX = 142; // Excel row 143
 const WEIGHT_COL = 1; // column B
 
 const ZONE_COLS = [
@@ -70,11 +70,21 @@ function parse(filePath) {
   const ws = wb.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
+  // Locate header row dynamically: first row where WEIGHT_COL contains "KILOS"
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 150); i++) {
+    const cell = String(rows[i]?.[WEIGHT_COL] ?? '').trim();
+    if (/^kilo/i.test(cell)) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) {
+    return { rates: [], zoneMappings: buildZoneMappings(), warning: 'No se encontró la cabecera KILOS en la hoja' };
+  }
+
   const extraPerKg = {};
   const ratesByZone = {};
   ZONE_COLS.forEach(({ zone }) => { ratesByZone[zone] = []; });
 
-  for (let i = PRICE_HEADER_IDX + 1; i <= PRICE_DATA_END_IDX && i < rows.length; i++) {
+  for (let i = headerIdx + 1; i < Math.min(rows.length, headerIdx + 80); i++) {
     const row = rows[i];
     if (!row) continue;
 
@@ -82,6 +92,7 @@ function parse(filePath) {
     if (rawWeight === null || rawWeight === undefined) continue;
 
     const weightStr = String(rawWeight).trim();
+    if (!weightStr) continue;
 
     // Detect extra_per_kg row: '>1000', '>X', 'más de'
     const isExtraRow =
@@ -91,9 +102,7 @@ function parse(filePath) {
     if (isExtraRow) {
       for (const { col, zone } of ZONE_COLS) {
         const price = parseFloat(row[col]);
-        if (!isNaN(price) && price > 0) {
-          extraPerKg[zone] = price;
-        }
+        if (!isNaN(price) && price > 0) extraPerKg[zone] = price;
       }
       continue;
     }
@@ -115,7 +124,7 @@ function parse(filePath) {
     }
   }
 
-  // Flatten and attach extra_per_kg to last tier
+  // Flatten and attach extra_per_kg to last tier of each zone
   const rates = [];
   for (const { zone } of ZONE_COLS) {
     const zoneRates = ratesByZone[zone];
@@ -125,9 +134,7 @@ function parse(filePath) {
     rates.push(...zoneRates);
   }
 
-  const zoneMappings = buildZoneMappings();
-
-  return { rates, zoneMappings };
+  return { rates, zoneMappings: buildZoneMappings() };
 }
 
 module.exports = { parse };

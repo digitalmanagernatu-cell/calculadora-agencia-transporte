@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_PATH)) {
 }
 
 // Increment this when parsers or zone mappings change — forces a full reseed
-const SEED_VERSION = 7;
+const SEED_VERSION = 8;
 
 // Initialize DB schema
 initSchema();
@@ -76,6 +76,51 @@ async function seedPalemaniaIfNeeded() {
   }
 }
 
+// Seed Correos Express on startup if rates are missing.
+// Also cleans up any previously uploaded agencies with "CORREOS" in the name.
+function seedCorreosExpressIfNeeded() {
+  // Remove stale Correos agencies (e.g. uploaded via UI with a different name)
+  try {
+    const stale = db.prepare("SELECT id, name FROM agencies WHERE UPPER(name) LIKE '%CORREO%' AND name != 'CORREOS_EXPRESS'").all();
+    for (const a of stale) {
+      db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(a.id);
+      db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(a.id);
+      db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(a.id);
+      db.prepare('DELETE FROM agencies WHERE id = ?').run(a.id);
+      console.log('[seed] Correos: eliminada agencia obsoleta:', a.name);
+    }
+  } catch (_) {}
+
+  db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('CORREOS_EXPRESS', 'Correos Express');
+  const agency = db.prepare("SELECT id FROM agencies WHERE name = 'CORREOS_EXPRESS'").get();
+
+  const count = db.prepare('SELECT COUNT(*) as c FROM tariff_rates WHERE agency_id = ?').get(agency.id).c;
+  if (count > 0) return;
+
+  console.log('[seed] Correos Express: cargando tarifa...');
+  try {
+    const parsed = require('./parsers/correos_express').parse();
+    const doInsert = db.transaction(() => {
+      db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(agency.id);
+      db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(agency.id);
+      const insertRate = db.prepare(
+        'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      const insertMapping = db.prepare(
+        'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+      );
+      for (const r of parsed.rates) insertRate.run(agency.id, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+      for (const m of parsed.zoneMappings) insertMapping.run(agency.id, m.scope, m.zone, m.destination);
+      db.prepare('INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)').run(agency.id, 'nacional', 'correos_express');
+    });
+    doInsert();
+    console.log(`[seed] Correos Express: ${parsed.rates.length} tarifas cargadas.`);
+  } catch (err) {
+    console.error('[seed] Error al cargar Correos Express:', err.message);
+  }
+}
+
 // Seed initial data when DB is empty OR seed version has changed
 async function seedInitialData() {
   const stored = db.prepare("SELECT value FROM meta WHERE key = 'seed_version'").get();
@@ -86,6 +131,8 @@ async function seedInitialData() {
 
   // PALEMANIA re-seed: runs independently whenever the file is present but rates are empty
   await seedPalemaniaIfNeeded();
+  // CORREOS EXPRESS re-seed: runs independently whenever rates are empty
+  seedCorreosExpressIfNeeded();
 
   if (!needsFullSeed) return;
 
@@ -204,6 +251,30 @@ async function seedInitialData() {
     } catch (err) {
       console.error(`[seed] Error procesando ${seed.file}:`, err.message);
     }
+  }
+
+  // Correos Express: always re-seed on full seed (clear + insert)
+  try {
+    db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('CORREOS_EXPRESS', 'Correos Express');
+    const ceAgency = db.prepare("SELECT id FROM agencies WHERE name = 'CORREOS_EXPRESS'").get();
+    const ceParsed = require('./parsers/correos_express').parse();
+    db.transaction(() => {
+      db.prepare('DELETE FROM tariff_rates WHERE agency_id = ?').run(ceAgency.id);
+      db.prepare('DELETE FROM zone_mappings WHERE agency_id = ?').run(ceAgency.id);
+      db.prepare('DELETE FROM tariff_files WHERE agency_id = ?').run(ceAgency.id);
+      const insertRate = db.prepare(
+        'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      const insertMapping = db.prepare(
+        'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+      );
+      for (const r of ceParsed.rates) insertRate.run(ceAgency.id, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+      for (const m of ceParsed.zoneMappings) insertMapping.run(ceAgency.id, m.scope, m.zone, m.destination);
+      db.prepare('INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)').run(ceAgency.id, 'nacional', 'correos_express');
+    })();
+    console.log('[seed] OK: Correos Express (hardcoded, nacional)');
+  } catch (err) {
+    console.error('[seed] Error al cargar Correos Express:', err.message);
   }
 
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('seed_version', ?)").run(String(SEED_VERSION));
