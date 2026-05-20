@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - claude/shipping-calculator-app-7DIQB
+      - claude/fix-deployment-issues-JXBgo
 
 jobs:
   deploy:
