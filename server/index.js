@@ -19,7 +19,7 @@ if (!fs.existsSync(UPLOADS_PATH)) {
 }
 
 // Increment this when parsers or zone mappings change — forces a full reseed
-const SEED_VERSION = 8;
+const SEED_VERSION = 9;
 
 // Initialize DB schema
 initSchema();
