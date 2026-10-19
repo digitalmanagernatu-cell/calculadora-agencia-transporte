@@ -130,11 +130,11 @@ function seedTransaherIfNeeded() {
     db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('TRANSAHER', 'Transaher');
     const agency = db.prepare("SELECT id FROM agencies WHERE name = 'TRANSAHER'").get();
 
-    // Check if new 9-zone structure already loaded (ZONA 9 in nacional zone_mappings)
-    const hasZona9 = db.prepare(
-      "SELECT 1 FROM zone_mappings WHERE agency_id = ? AND scope = 'nacional' AND zone = 'ZONA 9' LIMIT 1"
+    // Check if new 9-zone structure already loaded: count distinct nacional zones (should be >= 9)
+    const zoneCount = db.prepare(
+      "SELECT COUNT(DISTINCT zone) as c FROM tariff_rates WHERE agency_id = ? AND scope = 'nacional'"
     ).get(agency.id);
-    if (hasZona9) return; // already up to date
+    if (zoneCount && zoneCount.c >= 9) return; // already up to date
 
     console.log('[seed] Transaher: estructura de zonas antigua detectada, re-importando...');
     const parser = require('./parsers/transaher');
