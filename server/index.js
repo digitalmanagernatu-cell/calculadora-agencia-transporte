@@ -121,6 +121,55 @@ function seedCorreosExpressIfNeeded() {
   }
 }
 
+// Seed Transaher on startup if national zone structure is outdated (old had 4 zones, new has 9).
+function seedTransaherIfNeeded() {
+  const filePath = path.join(INITIAL_DATA_PATH, 'transaher 2026.xlsx');
+  if (!fs.existsSync(filePath)) return;
+
+  try {
+    db.prepare('INSERT OR IGNORE INTO agencies (name, display_name) VALUES (?, ?)').run('TRANSAHER', 'Transaher');
+    const agency = db.prepare("SELECT id FROM agencies WHERE name = 'TRANSAHER'").get();
+
+    // Check if new 9-zone structure already loaded (ZONA 9 in nacional zone_mappings)
+    const hasZona9 = db.prepare(
+      "SELECT 1 FROM zone_mappings WHERE agency_id = ? AND scope = 'nacional' AND zone = 'ZONA 9' LIMIT 1"
+    ).get(agency.id);
+    if (hasZona9) return; // already up to date
+
+    console.log('[seed] Transaher: estructura de zonas antigua detectada, re-importando...');
+    const parser = require('./parsers/transaher');
+    const parsed = parser.parse(filePath);
+    if (parsed.warning) console.warn('[seed] transaher:', parsed.warning);
+
+    const scopesToProcess = ['nacional', 'internacional'];
+    db.transaction(() => {
+      for (const scope of scopesToProcess) {
+        db.prepare('DELETE FROM tariff_rates WHERE agency_id = ? AND scope = ?').run(agency.id, scope);
+        db.prepare('DELETE FROM zone_mappings WHERE agency_id = ? AND scope = ?').run(agency.id, scope);
+        db.prepare('DELETE FROM tariff_files WHERE agency_id = ? AND scope = ?').run(agency.id, scope);
+
+        const insertRate = db.prepare(
+          'INSERT INTO tariff_rates (agency_id, scope, zone, weight_max_kg, price, extra_per_kg) VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        const insertMapping = db.prepare(
+          'INSERT INTO zone_mappings (agency_id, scope, zone, destination) VALUES (?, ?, ?, ?)'
+        );
+        for (const r of parsed.rates.filter(x => x.scope === scope)) {
+          insertRate.run(agency.id, r.scope, r.zone, r.weight_max_kg, r.price, r.extra_per_kg ?? null);
+        }
+        for (const m of parsed.zoneMappings.filter(x => x.scope === scope)) {
+          insertMapping.run(agency.id, m.scope, m.zone, m.destination);
+        }
+        db.prepare('INSERT INTO tariff_files (agency_id, scope, filename) VALUES (?, ?, ?)')
+          .run(agency.id, scope, 'transaher 2026.xlsx');
+      }
+    })();
+    console.log(`[seed] Transaher: ${parsed.rates.length} tarifas cargadas (9 zonas).`);
+  } catch (err) {
+    console.error('[seed] Error al re-importar Transaher:', err.message);
+  }
+}
+
 // Seed initial data when DB is empty OR seed version has changed
 async function seedInitialData() {
   const stored = db.prepare("SELECT value FROM meta WHERE key = 'seed_version'").get();
@@ -133,6 +182,8 @@ async function seedInitialData() {
   await seedPalemaniaIfNeeded();
   // CORREOS EXPRESS re-seed: runs independently whenever rates are empty
   seedCorreosExpressIfNeeded();
+  // TRANSAHER re-seed: runs independently when zone structure is outdated (< 9 zones)
+  seedTransaherIfNeeded();
 
   if (!needsFullSeed) return;
 
